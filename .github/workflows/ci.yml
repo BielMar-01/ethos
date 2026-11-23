@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancela execuções antigas da mesma branch quando chega um push novo.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci && npm --prefix client ci
+
+      - name: Tipos do servidor
+        run: npx tsc --noEmit
+
+      - name: Lint da interface
+        run: npm --prefix client run lint
+
+      # Os testes usam Postgres em memória (PGlite): não precisam de segredos nem tocam o Supabase.
+      - name: Testes
+        run: npm test
+
+      - name: Build (servidor + interface)
+        run: npm run build
