@@ -1,0 +1,7 @@
+.env
+.env.*
+test
+docs
+data
+client/node_modules
+node_modules

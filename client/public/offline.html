@@ -13,7 +13,7 @@
       .mark { width: 64px; height: 64px; margin: 0 auto 1.25rem; }
       h1 { margin: 0 0 0.5rem; font-size: 1.5rem; }
       p { margin: 0 0 1.5rem; color: var(--muted); line-height: 1.55; }
-      button { min-height: 44px; padding: 0 1.4rem; font: inherit; font-weight: 600; color: var(--accent-text); background: var(--accent); border: 0; border-radius: 10px; cursor: pointer; }
+      .btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0 1.4rem; text-decoration: none; font: inherit; font-weight: 600; color: var(--accent-text); background: var(--accent); border-radius: 10px; }
     </style>
   </head>
   <body>
@@ -21,7 +21,7 @@
       <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#0d0d0f"/><path fill="#c9a24a" d="M19 14h27v7H27v7h15v7H27v8h19v7H19z"/></svg>
       <h1>Você está sem conexão</h1>
       <p>O Ethos precisa de internet para mostrar seus dados com segurança. Nada foi perdido: assim que a conexão voltar, é só tentar de novo.</p>
-      <button onclick="location.reload()">Tentar novamente</button>
+      <a class="btn" href="/">Tentar novamente</a>
     </main>
   </body>
 </html>

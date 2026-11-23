@@ -39,6 +39,13 @@ export function createApp() {
   app.disable("x-powered-by");
   // Atrás de proxy (Vercel etc.) o IP real vem de X-Forwarded-For; sem isso, limites e auditoria veem só o IP do proxy.
   if (process.env.VERCEL || process.env.TRUST_PROXY) app.set("trust proxy", 1);
+  // Cabeçalhos básicos de segurança (a CSP completa e o HSTS ficam em vercel.json / no proxy).
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
   app.use(express.json({ limit: "100kb" }));
   app.use(loadAuth);
   app.use(auditMiddleware);

@@ -29,6 +29,9 @@ npm run build && npm run demo   # http://localhost:3100, tudo em memória, dados
 ```
 Logins de demonstração (senha `demo-1234-senha`): `admin@demo.test`, `demo.inquilino@example.com`, `demo.proprietario@example.com`.
 
+## Publicar
+Vercel: veja [`docs/DEPLOY-VERCEL.md`](docs/DEPLOY-VERCEL.md).
+
 ## Testes e verificação
 ```bash
 npm test                 # 100+ testes de API e regras de negócio (Postgres em memória)

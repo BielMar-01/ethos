@@ -56,7 +56,9 @@ if (useMemory) {
   pool = new pg.Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }, // Supabase exige TLS
-    max: 10,
+    // Em serverless cada instância abre as próprias conexões: poucas por instância (use o pooler do Supabase).
+    max: Number(process.env.DB_POOL_MAX ?? (process.env.VERCEL ? 3 : 10)),
+    idleTimeoutMillis: process.env.VERCEL ? 10_000 : 30_000,
   });
 }
 

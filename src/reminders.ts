@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { Router } from "express";
 import { db } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
@@ -130,4 +131,25 @@ export function startReminderJob(): NodeJS.Timeout {
 export const remindersRouter = Router();
 remindersRouter.post("/reminders/run", requireAuth, requireRole("admin"), async (req, res) => {
   res.json(await runReminders(req.auth!.organization.id));
+});
+
+/**
+ * Chamada pelo agendador da hospedagem (Vercel Cron envia `Authorization: Bearer $CRON_SECRET`).
+ * Sem CRON_SECRET configurado a rota fica desligada (404), nunca aberta.
+ */
+remindersRouter.get("/reminders/cron", async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    res.status(404).json({ error: "Rota não encontrada" });
+    return;
+  }
+  const given = Buffer.from(req.get("authorization") ?? "");
+  const expected = Buffer.from(`Bearer ${secret}`);
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
+    res.status(401).json({ error: "Não autorizado" });
+    return;
+  }
+  await runAllReminders();
+  await pruneNotifications();
+  res.json({ ok: true });
 });

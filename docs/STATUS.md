@@ -40,7 +40,7 @@
 2. ⬜ **Testes de interface** (Playwright) dos fluxos críticos e teste de acessibilidade.
 3. ⬜ **Testar o e-mail de recuperação de senha e o link do admin** contra o Supabase real; cadastrar `APP_URL` nas *Redirect URLs*; configurar **SMTP próprio** (o padrão do Supabase tem limite baixo).
 4. ⬜ **Trocar os segredos expostos na conversa** (senha do banco, `SUPABASE_SECRET_KEY`, senha temporária do admin).
-5. ⬜ **Deploy (Vercel em preparo)**: o Express precisa de adaptação serverless (`api/index.ts` + `vercel.json`), lembretes por Cron externo, `APP_URL`/Redirect URLs do Supabase; hospedagem, domínio, HTTPS, variáveis de produção, CI (testes a cada push), backup/restauração do banco. Em hospedagem *serverless*, os lembretes precisam de agendador externo (`POST /api/reminders/run`).
+5. 🟡 **Deploy na Vercel preparado** (`docs/DEPLOY-VERCEL.md`): falta criar o projeto, definir variáveis, domínio, SMTP e backup do banco; CI (testes a cada push) ainda não existe.
 6. ⬜ **Identidade visual oficial** (logotipo e paleta): hoje são tokens provisórios.
 7. ⬜ **Segurança de produção**: cabeçalhos (CSP/HSTS), CSRF dedicado, limite de requisições compartilhado entre instâncias, logs estruturados, revisão de segurança externa.
 
