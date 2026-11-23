@@ -74,7 +74,7 @@ function answer(ok: boolean) {
 const subscribeAsk = (l: () => void) => (askListeners.add(l), () => void askListeners.delete(l))
 
 function ConfirmDialog() {
-  const p = useSyncExternalStore(subscribeAsk, () => pending)
+  const p = useSyncExternalStore(subscribeAsk, () => pending, () => null)
   const confirmRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (!p) return
@@ -107,7 +107,7 @@ function ConfirmDialog() {
 const SYMBOL: Record<Kind, string> = { success: '✓', error: '!', info: 'i' }
 
 function ToastStack() {
-  const list = useSyncExternalStore(subscribe, snapshot)
+  const list = useSyncExternalStore(subscribe, snapshot, snapshot)
   return (
     <div className="toasts" aria-live="polite">
       {list.map((t) => (

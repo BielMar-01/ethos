@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type Role, type Session } from './api'
+import { api, ROLE_LABELS, type Role, type Session } from './api'
 import type { AppNotification } from './commApi'
 import AnnouncementsPage from './AnnouncementsPage'
 import ApiPage from './ApiPage'
@@ -84,6 +84,21 @@ const TENANT_TAB: Record<string, string> = { maintenance: 'maintenance', inspect
 const OWNER_TAB: Record<string, string> = { maintenance: 'maintenance', inspection: 'inspections', lease: 'properties', announcement: 'announcements' }
 
 const isStaffRole = (r: Role) => r === 'admin' || r === 'colaborador'
+const COLLAPSE_KEY = 'ethos-sidebar'
+const MOBILE = '(max-width: 960px)'
+
+/** Menu recolhido: a escolha do usuário vale; sem escolha, telas médias (tablet) começam recolhidas. */
+function initialCollapsed(): boolean {
+  try {
+    const saved = localStorage.getItem(COLLAPSE_KEY)
+    if (saved === '1') return true
+    if (saved === '0') return false
+  } catch {
+    /* sem armazenamento: usa o padrão */
+  }
+  return typeof window !== 'undefined' && window.innerWidth < 1200
+}
+
 const initials = (name: string) => name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]!.toUpperCase()).join('')
 
 export default function Shell({ session, onLogout, onSession }: { session: Session; onLogout: () => void; onSession: (s: Session) => void }) {
@@ -93,6 +108,7 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
 
   const [current, setCurrent] = useState(home)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(initialCollapsed)
   const [orgs, setOrgs] = useState<{ id: number; name: string }[]>([])
   const [portalTarget, setPortalTarget] = useState<{ tab: string; n: number } | null>(null)
 
@@ -111,6 +127,22 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
       document.body.style.overflow = ''
     }
   }, [menuOpen])
+
+  /** Botão do topo: no celular abre/fecha a gaveta; no tablet e no computador recolhe/expande a barra lateral. */
+  function toggleMenu() {
+    if (window.matchMedia(MOBILE).matches) {
+      setMenuOpen((o) => !o)
+      return
+    }
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
+      } catch {
+        /* ignora */
+      }
+      return !c
+    })
+  }
 
   const navigate = useCallback((key: string) => {
     setCurrent(key)
@@ -162,11 +194,14 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
   else content = <Dashboard key={`d-${orgKey}`} name={session.user.name} onNavigate={navigate} />
 
   return (
-    <div className="shell">
+    <div className={collapsed ? 'shell collapsed' : 'shell'}>
       <a className="skip-link" href="#main">Ir para o conteúdo</a>
       <OfflineBanner />
       <aside id="sidebar" className={menuOpen ? 'sidebar open' : 'sidebar'} aria-label="Menu principal">
-        <div className="brand">Ethos</div>
+        <div className="brand" title="Ethos">
+          <span className="brand-mark" aria-hidden="true">E</span>
+          <span className="brand-text">Ethos</span>
+        </div>
         <nav>
           {groups.map((g, gi) => (
             <div key={gi}>
@@ -174,20 +209,46 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
               {g.items
                 .filter((i) => !i.adminOnly || isAdmin)
                 .map((i) => (
-                  <button key={i.key} className={i.key === current ? 'nav active' : 'nav'} aria-current={i.key === current ? 'page' : undefined} onClick={() => navigate(i.key)}>
+                  <button
+                    key={i.key}
+                    className={i.key === current ? 'nav active' : 'nav'}
+                    aria-current={i.key === current ? 'page' : undefined}
+                    title={collapsed ? i.label : undefined}
+                    onClick={() => navigate(i.key)}
+                  >
                     <Icon name={i.icon} size={18} />
-                    {i.label}
+                    <span className="nav-text">{i.label}</span>
                   </button>
                 ))}
             </div>
           ))}
         </nav>
+        <div className="sidebar-foot">
+          <div className="user-card" title={collapsed ? `${session.user.name} (${ROLE_LABELS[session.role]})` : undefined}>
+            <span className="avatar" aria-hidden="true">{initials(session.user.name)}</span>
+            <span className="who">
+              <strong>{session.user.name}</strong>
+              <small>{ROLE_LABELS[session.role]}</small>
+            </span>
+          </div>
+          <button className="nav logout" onClick={onLogout} title={collapsed ? 'Sair' : undefined}>
+            <Icon name="logout" size={18} />
+            <span className="nav-text">Sair</span>
+          </button>
+        </div>
       </aside>
       {menuOpen && <div className="scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />}
 
       <div className="content">
         <header className="topbar">
-          <button className="icon-btn menu-btn" onClick={() => setMenuOpen((o) => !o)} aria-label="Abrir menu" aria-expanded={menuOpen} aria-controls="sidebar">
+          <button
+            className="icon-btn menu-btn"
+            onClick={toggleMenu}
+            aria-label={menuOpen ? 'Fechar menu' : collapsed ? 'Expandir menu' : 'Recolher menu'}
+            aria-expanded={menuOpen || !collapsed}
+            aria-controls="sidebar"
+            title={collapsed ? 'Expandir menu' : 'Recolher menu'}
+          >
             <Icon name={menuOpen ? 'x' : 'menu'} />
           </button>
           {orgs.length > 1 ? (
@@ -203,16 +264,6 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
           <InstallButton />
           <ThemeToggle />
           <NotificationBell key={orgKey} onOpenItem={openNotification} onSeeAll={() => navigate('notifications')} />
-          <div className="user-chip">
-            <span className="avatar" aria-hidden="true">{initials(session.user.name)}</span>
-            <span className="who">
-              <strong>{session.user.name}</strong>
-              <small>{session.role}</small>
-            </span>
-          </div>
-          <button className="icon-btn" onClick={onLogout} title="Sair" aria-label="Sair">
-            <Icon name="logout" />
-          </button>
         </header>
         <main id="main" tabIndex={-1}>{content}</main>
       </div>

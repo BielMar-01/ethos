@@ -5,11 +5,12 @@ import PasswordInput from './PasswordInput'
 import LandingPage, { PublicLayout } from './LandingPage'
 import ApiPage from './ApiPage'
 import Shell from './Shell'
-import { go, routeFromHash, type PublicRoute } from './routes'
+import { go, isStandalone, routeFromHash, type PublicRoute } from './routes'
 import './App.css'
 import './layout.css'
 import './ux.css'
 import './public.css'
+import './shell.css'
 import { Alert, Loading, toast } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
@@ -148,9 +149,11 @@ function AuthForm({ onAuth, notice, initialMode = 'login' }: { onAuth: (s: Sessi
       <button type="button" className="link" onClick={() => switchMode(mode === 'register' ? 'login' : mode === 'login' ? 'register' : 'login')}>
         {mode === 'login' ? 'Não tem conta? Cadastre-se' : 'Voltar para o login'}
       </button>
-      <button type="button" className="link" onClick={() => go('home')}>
-        ← Voltar ao início
-      </button>
+      {!isStandalone() && (
+        <button type="button" className="link" onClick={() => go('home')}>
+          ← Voltar ao início
+        </button>
+      )}
     </Page>
   )
 }
@@ -355,7 +358,7 @@ export default function App() {
         await api.logout().catch(() => {})
         setSession(null)
         toast.success('Você saiu do sistema.')
-        go('home')
+        go(isStandalone() ? 'login' : 'home')
       }}
     />
   )

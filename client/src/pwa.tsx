@@ -53,7 +53,7 @@ const subscribe = (l: () => void) => (listeners.add(l), () => void listeners.del
 
 /** Botão "Instalar app": aparece só quando o navegador permite instalar e o app ainda não está instalado. */
 export function InstallButton() {
-  const available = useSyncExternalStore(subscribe, () => deferred !== null)
+  const available = useSyncExternalStore(subscribe, () => deferred !== null, () => false)
   if (!available) return null
   return (
     <button

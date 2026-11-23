@@ -1,5 +1,12 @@
 export type PublicRoute = 'home' | 'login' | 'register' | 'api'
 
+/** Rodando como app instalado (PWA): não existe "página inicial de divulgação", o app abre direto no login. */
+export function isStandalone(): boolean {
+  if (typeof window === 'undefined') return false
+  const nav = window.navigator as Navigator & { standalone?: boolean }
+  return window.matchMedia?.('(display-mode: standalone)').matches === true || nav.standalone === true
+}
+
 /** Navegação por hash (#/entrar), sem biblioteca de rotas. O hash de recuperação de senha não começa com "/". */
 export function routeFromHash(hash: string): PublicRoute {
   switch (hash.replace(/^#\/?/, '')) {
@@ -10,7 +17,7 @@ export function routeFromHash(hash: string): PublicRoute {
     case 'api':
       return 'api'
     default:
-      return 'home'
+      return isStandalone() ? 'login' : 'home'
   }
 }
 
