@@ -32,7 +32,7 @@ Logins de demonstração (senha `demo-1234-senha`): `admin@demo.test`, `demo.inq
 ## Testes de ponta a ponta (Playwright)
 ```bash
 npx playwright install chromium   # uma vez
-npm run test:e2e                  # build + 69 testes em navegador (desktop e celular) sobre o modo demo
+npm run test:e2e                  # build + 70 testes em navegador (desktop e celular) sobre o modo demo
 npm run test:e2e:run              # sem rebuild
 npx playwright show-report        # relatório da última execução
 ```

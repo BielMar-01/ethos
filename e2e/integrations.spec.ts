@@ -55,20 +55,68 @@ test.describe("integrações (admin)", () => {
     await expect(card(page, "Asaas").getByText("Não conectado")).toBeVisible();
   });
 
-  test("IA: valida o formato da chave da Anthropic e salva o modelo", async ({ page }) => {
+  test("IA: escolhe entre vários provedores, valida a chave, define o principal e mostra no cartão", async ({ page }) => {
+    await page.route("**/api/integrations/openai/test", (route) => route.fulfill({ json: { ok: true, message: "Conectado a OpenAI (GPT)." } }));
     await openIntegrations(page);
-    await card(page, "IA — leitura").getByRole("button", { name: "Configurar" }).click();
+    await card(page, "IA — leitura").getByRole("button", { name: /Configurar|Gerenciar/ }).click();
     const dlg = page.getByRole("dialog");
+    // Todos os provedores aparecem como abas.
+    for (const nome of ["Anthropic", "OpenAI", "Google", "xAI", "DeepSeek", "Mistral", "Groq", "Together AI", "OpenRouter", "Outro"]) {
+      await expect(dlg.getByRole("tab", { name: new RegExp("^" + nome) }), nome).toBeVisible();
+    }
+    // Anthropic: formato da chave é validado.
+    await dlg.getByRole("tab", { name: /^Anthropic/ }).click();
     await dlg.locator('input[autocomplete="off"]').fill("chave-sem-prefixo-123456789012345");
     await dlg.getByRole("button", { name: "Salvar" }).click();
     await expect(dlg.getByRole("alert")).toContainText("sk-ant-");
-    await dlg.locator('input[autocomplete="off"]').fill("sk-ant-api03-e2eE2eE2eE2eE2eE2eE2eE2e");
-    await dlg.getByLabel("Modelo").selectOption("claude-sonnet-5-5");
+
+    // DeepSeek avisa que só lê texto; OpenAI aceita modelo livre e vira o principal.
+    await dlg.getByRole("tab", { name: /^DeepSeek/ }).click();
+    await expect(dlg).toContainText("Não lê fotos (só texto)");
+    await dlg.getByRole("tab", { name: /^OpenAI/ }).click();
+    await expect(dlg).toContainText("lê PDF direto");
+    await dlg.locator('input[autocomplete="off"]').fill("sk-e2e-0123456789abcdef");
+    await dlg.getByPlaceholder("gpt-4.1").fill("gpt-4o-mini");
+    await dlg.getByLabel("Usar este provedor para ler documentos").check();
     await dlg.getByRole("button", { name: "Salvar" }).click();
-    await expect(page.getByText("Configuração da IA salva.")).toBeVisible();
-    await dlg.getByRole("button", { name: "Remover chave" }).click();
-    await page.getByRole("alertdialog").getByRole("button", { name: /Confirmar|Remover/ }).click();
-    await expect(dlg).toHaveCount(0);
+    await expect(page.getByText("OpenAI salvo.")).toBeVisible();
+    await expect(dlg).toContainText("Em uso agora: OpenAI (GPT)");
+    await expect(dlg).toContainText("termina em …cdef");
+    const body = await (await page.request.get("/api/integrations")).text();
+    expect(body).not.toContain("sk-e2e-0123");
+    await dlg.getByRole("button", { name: "Testar conexão" }).click();
+    await expect(page.getByText("Conectado a OpenAI (GPT).")).toBeVisible();
+
+    // OpenRouter com ID de modelo no formato fabricante/modelo; modelo inválido é recusado.
+    await dlg.getByRole("tab", { name: /^OpenRouter/ }).click();
+    await dlg.locator('input[autocomplete="off"]').fill("sk-or-e2e-0123456789");
+    await dlg.getByPlaceholder("openai/gpt-4o-mini").fill("modelo inválido;");
+    await dlg.getByRole("button", { name: "Salvar" }).click();
+    await expect(dlg.getByRole("alert")).toContainText("Nome de modelo inválido");
+    await dlg.getByPlaceholder("openai/gpt-4o-mini").fill("google/gemini-2.5-flash");
+    await dlg.getByLabel("Usar este provedor para ler documentos").check();
+    await dlg.getByRole("button", { name: "Salvar" }).click();
+    await expect(dlg).toContainText("Em uso agora: OpenRouter");
+
+    // "Outro" exige URL base.
+    await dlg.getByRole("tab", { name: /^Outro/ }).click();
+    await expect(dlg.getByLabel("URL base (https)")).toBeVisible();
+
+    // Fecha e o cartão mostra o provedor em uso.
+    await page.keyboard.press("Escape");
+    await expect(card(page, "IA — leitura").getByText(/Em uso: OpenRouter/)).toBeVisible();
+    // Deixa o demo limpo para os outros testes (que rodam em paralelo no mesmo servidor).
+    for (const p of ["openai", "openrouter"]) await page.request.delete(`/api/integrations/${p}`);
+  });
+
+  test("Ler documentos mostra qual provedor está lendo e avisa quando só lê texto", async ({ page }) => {
+    await page.route("**/api/extract/status", (route) =>
+      route.fulfill({ json: { enabled: true, source: "organization", provider: { label: "DeepSeek", model: "deepseek-chat", images: false }, max_bytes: 4194304 } }),
+    );
+    await openPanel(page);
+    await menu(page).getByRole("button", { name: "Ler documentos", exact: true }).click();
+    await expect(page.getByText("Leitura feita por")).toContainText("DeepSeek");
+    await expect(page.getByText("lê só texto")).toBeVisible();
   });
 
   test("webhook de ponta a ponta: cria pelo modal, recebe o segredo uma vez, testa e a entrega chega assinada", async ({ page }) => {
@@ -109,37 +157,40 @@ test.describe("integrações (admin)", () => {
 
       // Testar: ping assinado chega ao receptor.
       const list = page.getByRole("dialog");
-      await list.getByRole("button", { name: "Testar" }).click();
+      const row = list.locator(".hook-list li").filter({ hasText: name });
+      await row.getByRole("button", { name: "Testar" }).click();
       await expect(page.getByText(/respondeu HTTP 200/)).toBeVisible();
-      expect(hits).toHaveLength(1);
-      expect(hits[0]!.headers["x-ethos-event"]).toBe("ping");
-      const sig = /t=(\d+),v1=([0-9a-f]+)/.exec(String(hits[0]!.headers["x-ethos-signature"]))!;
-      expect(crypto.createHmac("sha256", secret).update(`${sig[1]}.${hits[0]!.body}`).digest("hex")).toBe(sig[2]);
+      const pings = () => hits.filter((h) => h.headers["x-ethos-event"] === "ping");
+      expect(pings()).toHaveLength(1);
+      const sig = /t=(\d+),v1=([0-9a-f]+)/.exec(String(pings()[0]!.headers["x-ethos-signature"]))!;
+      expect(crypto.createHmac("sha256", secret).update(`${sig[1]}.${pings()[0]!.body}`).digest("hex")).toBe(sig[2]);
 
       // Evento real: cadastrar proprietário pela API dispara owner.created para o endereço.
       const owner = unique("Dono Webhook");
       await page.request.post("/api/owners", { data: { name: owner, document: String(Math.floor(10_000_000_000 + Math.random() * 89_999_999_999)) } });
-      await expect.poll(() => hits.length).toBe(2);
-      expect(hits[1]!.headers["x-ethos-event"]).toBe("owner.created");
-      expect(JSON.parse(hits[1]!.body).data.item.name).toBe(owner);
+      const mine = () => hits.filter((h) => h.body.includes(owner));
+      await expect.poll(() => mine().length).toBe(1);
+      expect(mine()[0]!.headers["x-ethos-event"]).toBe("owner.created");
+      expect(JSON.parse(mine()[0]!.body).data.item.name).toBe(owner);
       // Um evento não assinado (inquilino) não chega.
-      await page.request.post("/api/tenants", { data: { name: unique("Inq"), document: String(Math.floor(10_000_000_000 + Math.random() * 89_999_999_999)) } });
-      await page.waitForTimeout(400);
-      expect(hits).toHaveLength(2);
+      const tenant = unique("Inq");
+      await page.request.post("/api/tenants", { data: { name: tenant, document: String(Math.floor(10_000_000_000 + Math.random() * 89_999_999_999)) } });
+      await page.waitForTimeout(500);
+      expect(hits.some((h) => h.body.includes(tenant))).toBe(false);
 
       // Histórico de entregas.
-      await list.getByRole("button", { name: "Entregas" }).click();
+      await row.getByRole("button", { name: "Entregas" }).click();
       const log = page.getByRole("dialog").last();
-      await expect(log.getByText("owner.created")).toBeVisible();
-      await expect(log.getByText("ping")).toBeVisible();
+      await expect(log.getByText("owner.created").first()).toBeVisible();
+      await expect(log.getByText("ping", { exact: true }).first()).toBeVisible();
       await page.keyboard.press("Escape");
 
       // Pausar e excluir (com confirmação).
-      await list.getByRole("button", { name: "Pausar" }).click();
-      await expect(list.getByText("Pausado").first()).toBeVisible();
-      await list.getByRole("button", { name: "Excluir" }).click();
+      await row.getByRole("button", { name: "Pausar" }).click();
+      await expect(row.getByText("Pausado")).toBeVisible();
+      await row.getByRole("button", { name: "Excluir" }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: "Excluir" }).click();
-      await expect(list.getByText("Nenhum endereço ainda")).toBeVisible();
+      await expect(list.locator(".hook-list li").filter({ hasText: name })).toHaveCount(0);
     } finally {
       server.close();
     }

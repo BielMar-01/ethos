@@ -130,6 +130,10 @@ test.describe("tudo abre em modal (computador)", () => {
     await goTo(page, "Modelos");
     await page.getByRole("button", { name: "Novo modelo" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
+    // Os chips de variáveis ficam no fluxo normal (já ficaram absolutos por colisão com o estilo da home).
+    const chip = page.getByRole("dialog").locator(".chips .chip").first();
+    await expect(chip).toBeVisible();
+    expect(await chip.evaluate((el) => getComputedStyle(el).position)).not.toBe("absolute");
     await page.keyboard.press("Escape");
     await goTo(page, "Comunicados");
     await page.getByRole("button", { name: "Ver", exact: true }).first().click();

@@ -15,18 +15,35 @@ import PasswordInput from './PasswordInput'
 interface State {
   secrets_ready: boolean
   asaas: Conn
-  anthropic: Conn & { server_key: boolean; models: string[] }
+  ai: {
+    catalog: AiDef[]
+    providers: Record<string, Conn>
+    server_key: boolean
+    active: { provider: string; label: string; model: string | null; source: 'organization' | 'server' } | null
+  }
   webhooks: { total: number; enabled: number }
   api_keys: { active: number }
 }
 interface Conn {
   configured: boolean
+  primary?: boolean
   enabled: boolean
   config: Record<string, unknown>
   hint: string | null
   last_tested_at: string | null
   last_status: 'ok' | 'error' | null
   last_error: string | null
+}
+interface AiDef {
+  id: string
+  label: string
+  kind: 'anthropic' | 'openai'
+  baseUrl: string | null
+  models: string[]
+  vision: boolean
+  pdf: boolean
+  keyUrl: string
+  note?: string
 }
 interface Hook {
   id: number
@@ -43,7 +60,7 @@ interface Hook {
 interface Delivery { id: number; event: string; status: 'ok' | 'error'; http_status: number | null; error: string | null; attempts: number; duration_ms: number | null; created_at: string }
 interface EventDef { event: string; label: string; group: string }
 
-type Open = null | 'asaas' | 'anthropic' | 'webhooks' | 'keys'
+type Open = null | 'asaas' | 'ai' | 'webhooks' | 'keys'
 
 export default function IntegrationsPage() {
   const [data, setData] = useState<State | null>(null)
@@ -71,7 +88,7 @@ export default function IntegrationsPage() {
   if (!data) return error ? <Alert>{error}</Alert> : <Loading label="Carregando integrações…" />
 
   const asaasBadge = badge(data.asaas)
-  const aiSource = data.anthropic.configured && data.anthropic.enabled ? 'da organização' : data.anthropic.server_key ? 'do servidor' : null
+  const ai = data.ai.active
 
   return (
     <section>
@@ -96,12 +113,12 @@ export default function IntegrationsPage() {
         <Card
           icon="camera"
           title="IA — leitura de documentos"
-          subtitle="Anthropic (Claude)"
-          status={aiSource ? { tone: 'ok', text: `Ativa (chave ${aiSource})` } : { tone: 'muted', text: 'Desligada' }}
-          onClick={() => setOpen('anthropic')}
-          cta={data.anthropic.configured ? 'Gerenciar' : 'Configurar'}
+          subtitle="Claude, GPT, Gemini, Grok, DeepSeek e mais"
+          status={ai ? { tone: 'ok', text: `Em uso: ${ai.label.split(' (')[0]}${ai.source === 'server' ? ' (chave do servidor)' : ''}` } : { tone: 'muted', text: 'Desligada' }}
+          onClick={() => setOpen('ai')}
+          cta={Object.values(data.ai.providers).some((p) => p.configured) ? 'Gerenciar' : 'Configurar'}
         >
-          Alimenta “Ler documentos”: foto ou PDF de RG, contrato e matrícula viram cadastros. Use a chave da sua organização para controlar o custo.
+          Alimenta “Ler documentos”: foto ou PDF de RG, contrato e matrícula viram cadastros. Use o provedor que preferir — Claude, GPT, Gemini, Grok, DeepSeek, OpenRouter ou outro compatível — com a chave da sua organização.
         </Card>
         <Card
           icon="code"
@@ -131,7 +148,7 @@ export default function IntegrationsPage() {
       </div>
 
       {open === 'asaas' && <AsaasModal conn={data.asaas} secretsReady={data.secrets_ready} onClose={close} />}
-      {open === 'anthropic' && <AnthropicModal conn={data.anthropic} secretsReady={data.secrets_ready} onClose={close} />}
+      {open === 'ai' && <AiModal initial={data.ai} secretsReady={data.secrets_ready} onClose={close} />}
       {open === 'webhooks' && <WebhooksModal secretsReady={data.secrets_ready} onClose={close} />}
       {open === 'keys' && (
         <Modal title="Chaves de API" subtitle="Consulta aos dados da organização (somente leitura)" size="lg" onClose={close}>
@@ -265,25 +282,49 @@ function AsaasModal({ conn, secretsReady, onClose }: { conn: Conn; secretsReady:
   )
 }
 
-// ------------------------------------------------------------------------------------------------ IA
+// ------------------------------------------------------------------------------------------------ IA (vários provedores)
 
-function AnthropicModal({ conn, secretsReady, onClose }: { conn: State['anthropic']; secretsReady: boolean; onClose: () => void }) {
+function AiModal({ initial, secretsReady, onClose }: { initial: State['ai']; secretsReady: boolean; onClose: () => void }) {
+  const [ai, setAi] = useState(initial)
+  const firstConfigured = initial.catalog.find((c) => initial.providers[c.id]?.configured)?.id
+  const [id, setId] = useState(initial.active?.provider && initial.active.source === 'organization' ? initial.active.provider : (firstConfigured ?? 'openai'))
+  const def = ai.catalog.find((c) => c.id === id)!
+  const conn = ai.providers[id]
   const [key, setKey] = useState('')
-  const [model, setModel] = useState(String(conn.config.model ?? ''))
-  const [enabled, setEnabled] = useState(conn.enabled || !conn.configured)
-  const [state, setState] = useState<Conn>(conn)
+  const [model, setModel] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [enabled, setEnabled] = useState(true)
+  const [primary, setPrimary] = useState(false)
   const [busy, setBusy] = useState<'' | 'save' | 'test'>('')
   const [error, setError] = useState('')
+
+  // Ao trocar de provedor, carrega os valores dele.
+  useEffect(() => {
+    const c = ai.providers[id]
+    setKey('')
+    setError('')
+    setModel(String(c?.config.model ?? ''))
+    setBaseUrl(String(c?.config.base_url ?? ''))
+    setEnabled(c ? c.enabled : true)
+    setPrimary(c ? c.config.primary === true : !Object.values(ai.providers).some((p) => p.configured))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+
+  const reload = async () => {
+    const fresh = await request<State>('/api/integrations')
+    setAi(fresh.ai)
+    return fresh.ai
+  }
 
   async function save(e?: FormEvent) {
     e?.preventDefault()
     setError('')
     setBusy('save')
     try {
-      const r = await request<{ integration: Conn }>('/api/integrations/anthropic', json('PUT', { api_key: key || undefined, model, enabled }))
-      setState(r.integration)
+      await request(`/api/integrations/${id}`, json('PUT', { api_key: key || undefined, model, base_url: def.id === 'custom' ? baseUrl : undefined, enabled, primary }))
       setKey('')
-      toast.success('Configuração da IA salva.')
+      await reload()
+      toast.success(`${def.label.split(' (')[0]} salvo.`)
     } catch (err) {
       setError(errorText(err))
     } finally {
@@ -295,8 +336,8 @@ function AnthropicModal({ conn, secretsReady, onClose }: { conn: State['anthropi
     setError('')
     setBusy('test')
     try {
-      const r = await request<{ ok: boolean; message: string }>('/api/integrations/anthropic/test', { method: 'POST' })
-      setState((s) => ({ ...s, last_status: r.ok ? 'ok' : 'error', last_error: r.ok ? null : r.message, last_tested_at: new Date().toISOString() }))
+      const r = await request<{ ok: boolean; message: string }>(`/api/integrations/${id}/test`, { method: 'POST' })
+      await reload()
       if (r.ok) toast.success(r.message)
       else toast.error(r.message)
     } catch (err) {
@@ -307,50 +348,104 @@ function AnthropicModal({ conn, secretsReady, onClose }: { conn: State['anthropi
   }
 
   async function disconnect() {
-    if (!(await ask('Remover a chave da IA da organização? A leitura de documentos passa a usar a chave do servidor, se houver.'))) return
+    if (!(await ask(`Remover a chave de ${def.label}?`))) return
     try {
-      await request('/api/integrations/anthropic', { method: 'DELETE' })
+      await request(`/api/integrations/${id}`, { method: 'DELETE' })
       toast.success('Chave removida.')
-      onClose()
+      await reload()
+      setKey('')
     } catch (err) {
       setError(errorText(err))
     }
   }
 
+  const listId = `models-${id}`
   return (
-    <Modal title="IA — leitura de documentos" subtitle="Anthropic (Claude)" onClose={onClose}>
-      <form className="stack" onSubmit={save}>
-        {!secretsReady && <Alert>Defina INTEGRATIONS_SECRET no servidor para poder salvar a chave.</Alert>}
+    <Modal title="IA — leitura de documentos" subtitle="Escolha o provedor e cole a sua chave" size="lg" onClose={onClose}>
+      <div className="stack">
+        {!secretsReady && <Alert>Defina INTEGRATIONS_SECRET no servidor para poder salvar chaves.</Alert>}
         <p className="muted small">
-          {conn.server_key ? 'O servidor já tem uma chave padrão; ' : 'Sem uma chave, a leitura de documentos fica desligada. '}
-          com a chave da sua organização o custo vai para a sua conta da Anthropic. Crie uma em console.anthropic.com.
-          Cada documento lido é enviado à Anthropic só para leitura e não fica guardado no Ethos.
+          {ai.active ? (
+            <>
+              Em uso agora: <strong>{ai.active.label}</strong>
+              {ai.active.model ? ` · ${ai.active.model}` : ''}
+              {ai.active.source === 'server' ? ' (chave padrão do servidor)' : ''}.
+            </>
+          ) : (
+            'Nenhum provedor em uso: a leitura de documentos está desligada.'
+          )}{' '}
+          Você pode configurar vários e escolher qual usar. Cada documento lido é enviado ao provedor escolhido só para leitura e não fica guardado no Ethos.
         </p>
-        <label>
-          Chave de API {state.hint && <span className="muted small">— guardada, termina em …{state.hint}</span>}
-          <PasswordInput value={key} onChange={(e) => setKey(e.target.value)} placeholder={state.configured ? 'Deixe em branco para manter a atual' : 'sk-ant-…'} autoComplete="off" />
-        </label>
-        <label>
-          Modelo
-          <select value={model} onChange={(e) => setModel(e.target.value)}>
-            <option value="">Padrão do sistema</option>
-            {conn.models.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </label>
-        <label className="check-line">
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          <span>Usar a chave da organização</span>
-        </label>
-        {state.configured && <TestResult conn={state} />}
-        {error && <Alert>{error}</Alert>}
-        <div className="actions">
-          {state.configured && <button type="button" className="danger" onClick={disconnect}>Remover chave</button>}
-          {state.configured && <button type="button" disabled={busy !== ''} onClick={test}>{busy === 'test' ? 'Testando…' : 'Testar conexão'}</button>}
-          <button type="submit" className="primary" disabled={busy !== '' || !secretsReady}>{busy === 'save' ? 'Salvando…' : 'Salvar'}</button>
+
+        <div className="provider-chips" role="tablist" aria-label="Provedores">
+          {ai.catalog.map((c) => {
+            const p = ai.providers[c.id]
+            return (
+              <button key={c.id} role="tab" aria-selected={c.id === id} className={c.id === id ? 'chip active' : 'chip'} onClick={() => setId(c.id)}>
+                {c.label.split(' (')[0]}
+                {p?.configured && <span className={`chip-dot ${p.enabled ? (p.config.primary ? 'main' : 'on') : 'off'}`} aria-label={p.config.primary ? 'em uso' : 'configurado'} />}
+              </button>
+            )
+          })}
         </div>
-      </form>
+
+        <form className="stack" onSubmit={save}>
+          <div className="provider-note">
+            <strong>{def.label}</strong>
+            <span className="muted small">
+              {def.vision ? 'Lê fotos' : 'Não lê fotos (só texto)'} · {def.kind === 'anthropic' || def.pdf ? 'lê PDF direto' : 'PDF: o texto é extraído antes de enviar'}
+              {def.keyUrl ? ` · criar chave: ${def.keyUrl}` : ''}
+            </span>
+            {def.note && <span className="muted small">{def.note}</span>}
+          </div>
+
+          {def.id === 'custom' && (
+            <label>
+              URL base (https)
+              <input type="url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://meu-servico.com/v1" required />
+            </label>
+          )}
+          <label>
+            Chave de API {conn?.hint && <span className="muted small">— guardada, termina em …{conn.hint}</span>}
+            <PasswordInput value={key} onChange={(e) => setKey(e.target.value)} placeholder={conn?.configured ? 'Deixe em branco para manter a atual' : def.kind === 'anthropic' ? 'sk-ant-…' : 'Cole a chave'} autoComplete="off" />
+          </label>
+          <label>
+            Modelo {def.kind !== 'anthropic' && <span className="muted small">— digite o ID exato (as opções são sugestões)</span>}
+            {def.kind === 'anthropic' ? (
+              <select value={model} onChange={(e) => setModel(e.target.value)}>
+                <option value="">Padrão do sistema</option>
+                {def.models.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            ) : (
+              <>
+                <input list={listId} value={model} onChange={(e) => setModel(e.target.value)} placeholder={def.models[0] ?? 'ID do modelo'} maxLength={100} />
+                <datalist id={listId}>
+                  {def.models.map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </>
+            )}
+          </label>
+          <label className="check-line">
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+            <span>Ativo</span>
+          </label>
+          <label className="check-line">
+            <input type="checkbox" checked={primary} onChange={(e) => setPrimary(e.target.checked)} />
+            <span>Usar este provedor para ler documentos</span>
+          </label>
+          {conn?.configured && <TestResult conn={conn} />}
+          {error && <Alert>{error}</Alert>}
+          <div className="actions">
+            {conn?.configured && <button type="button" className="danger" onClick={disconnect}>Remover chave</button>}
+            {conn?.configured && <button type="button" disabled={busy !== ''} onClick={test}>{busy === 'test' ? 'Testando…' : 'Testar conexão'}</button>}
+            <button type="submit" className="primary" disabled={busy !== '' || !secretsReady}>{busy === 'save' ? 'Salvando…' : 'Salvar'}</button>
+          </div>
+        </form>
+      </div>
     </Modal>
   )
 }

@@ -310,7 +310,7 @@
     transform: translateX(16px);
   }
 }
-.chip {
+.mock > .chip {
   position: absolute;
   padding: 0.4rem 0.8rem;
   font-size: 0.78rem;
@@ -322,13 +322,13 @@
   border-radius: 999px;
   box-shadow: var(--shadow-pop);
 }
-.chip-a {
+.mock > .chip-a {
   top: -14px;
   right: 18px;
   color: var(--ok);
   animation: chip-bob 5s ease-in-out infinite;
 }
-.chip-b {
+.mock > .chip-b {
   bottom: -16px;
   left: 28px;
   color: var(--info);
@@ -340,7 +340,7 @@
   }
 }
 @media (max-width: 600px) {
-  .chip-b {
+  .mock > .chip-b {
     left: 12px;
   }
 }

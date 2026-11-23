@@ -6,7 +6,9 @@ import { detectImage } from "./photos.js";
 import { parseMoney } from "./importer.js";
 import { RateLimiter } from "./ratelimit.js";
 import { recordAudit, requestInfo } from "./audit.js";
-import { orgAnthropic } from "./integrations.js";
+import { orgAi } from "./integrations.js";
+import type { AiProviderDef } from "./aiProviders.js";
+import { ExtractError, callOpenAiCompat, parseJsonLoose, type Media } from "./aiCompat.js";
 
 /**
  * Leitura automática de documentos (foto/PDF de RG, CNH, comprovante, contrato, matrícula, IPTU…) para pré-preencher
@@ -179,29 +181,47 @@ export function setExtractClientFactory(factory: ((apiKey?: string) => MessagesC
   clientFactory = factory ?? ((apiKey) => (apiKey ? new Anthropic({ apiKey }) : new Anthropic()));
 }
 
-export interface ExtractConfig {
-  apiKey?: string; // sem valor = o SDK usa ANTHROPIC_API_KEY do servidor
-  model: string;
-  source: "organization" | "server";
-}
+export type ExtractConfig =
+  | { kind: "anthropic"; apiKey?: string; model: string; source: "organization" | "server"; label: string }
+  | { kind: "openai"; def: AiProviderDef; baseUrl: string; apiKey: string; model: string; source: "organization"; label: string };
 
-/** Quem paga a leitura: a chave da própria organização (Integrações) ou, na falta dela, a do servidor. `null` = desligado. */
+/** Quem faz e paga a leitura: o provedor PRINCIPAL da organização (Integrações) ou, na falta dele, a chave Anthropic do servidor. `null` = desligado. */
 export async function resolveExtractConfig(orgId: number): Promise<ExtractConfig | null> {
-  const own = await orgAnthropic(orgId);
-  if (own) return { apiKey: own.apiKey, model: own.model || process.env.EXTRACT_MODEL || DEFAULT_MODEL, source: "organization" };
-  if (process.env.ANTHROPIC_API_KEY) return { model: process.env.EXTRACT_MODEL || DEFAULT_MODEL, source: "server" };
+  const own = await orgAi(orgId);
+  if (own) {
+    if (own.provider.kind === "anthropic") return { kind: "anthropic", apiKey: own.apiKey, model: own.model || process.env.EXTRACT_MODEL || DEFAULT_MODEL, source: "organization", label: own.provider.label };
+    return { kind: "openai", def: own.provider, baseUrl: own.provider.baseUrl ?? own.baseUrl ?? "", apiKey: own.apiKey, model: own.model || own.provider.models[0] || "", source: "organization", label: own.provider.label };
+  }
+  if (process.env.ANTHROPIC_API_KEY) return { kind: "anthropic", model: process.env.EXTRACT_MODEL || DEFAULT_MODEL, source: "server", label: "Anthropic (Claude)" };
   return null;
 }
 
-export class ExtractError extends Error {
-  constructor(message: string, public status: number) {
-    super(message);
-  }
-}
+export { ExtractError };
 
-type Media = "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
 
 export async function extractFromFile(data: Buffer, media: Media, config: ExtractConfig): Promise<Extraction> {
+  if (config.kind === "openai") {
+    const text = await callOpenAiCompat({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+      def: config.def,
+      data,
+      media,
+      system: SYSTEM,
+      schema: SCHEMA as unknown as Record<string, unknown>,
+      checkUrl: config.def.baseUrl === null,
+    });
+    try {
+      return sanitize(parseJsonLoose(text));
+    } catch {
+      throw new ExtractError("Não consegui interpretar a resposta da leitura. Tente de novo, use outro modelo ou preencha manualmente.", 502);
+    }
+  }
+  return extractWithAnthropic(data, media, config);
+}
+
+async function extractWithAnthropic(data: Buffer, media: Media, config: Extract<ExtractConfig, { kind: "anthropic" }>): Promise<Extraction> {
   const b64 = data.toString("base64");
   const source =
     media === "application/pdf"
@@ -253,7 +273,12 @@ export const extractRouter = Router();
 
 extractRouter.get("/extract/status", requireAuth, requireRole("admin", "colaborador"), async (req, res) => {
   const cfg = await resolveExtractConfig(req.auth!.organization.id);
-  res.json({ enabled: Boolean(cfg), source: cfg?.source ?? null, max_bytes: MAX_BYTES });
+  res.json({
+    enabled: Boolean(cfg),
+    source: cfg?.source ?? null,
+    provider: cfg ? { label: cfg.label, model: cfg.model, images: cfg.kind === "anthropic" ? true : cfg.def.vision } : null,
+    max_bytes: MAX_BYTES,
+  });
 });
 
 extractRouter.post("/extract", rawFile, requireAuth, requireRole("admin", "colaborador"), async (req, res) => {
@@ -270,7 +295,7 @@ extractRouter.post("/extract", rawFile, requireAuth, requireRole("admin", "colab
   // Tipo pelo CONTEÚDO, não pelo cabeçalho.
   const image = detectImage(body);
   const isPdf = body.subarray(0, 5).toString("latin1") === "%PDF-";
-  const media: Media | undefined = isPdf ? "application/pdf" : image ? (`image/${image}` as Media) : undefined;
+  const media: Media | undefined = isPdf ? "application/pdf" : image ?? undefined;
   if (!media) {
     res.status(400).json({ error: "Arquivo não reconhecido. Use JPEG, PNG, WebP ou PDF." });
     return;
@@ -292,7 +317,7 @@ extractRouter.post("/extract", rawFile, requireAuth, requireRole("admin", "colab
       entity: "extract",
       summary: "Enviou documento para leitura automática",
       status: 200,
-      metadata: { type: result.kind, bytes: body.length, media, source: config.source },
+      metadata: { type: result.kind, bytes: body.length, media, source: config.source, provider: config.kind === "openai" ? config.def.id : "anthropic" },
       ...requestInfo(req),
     });
     res.json(result);

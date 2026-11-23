@@ -86,6 +86,7 @@ function merge(draft: Draft, x: Extraction): Draft {
 
 export default function IntakePage({ onNavigate }: { onNavigate: (key: string) => void }) {
   const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [provider, setProvider] = useState<{ label: string; model: string; images: boolean } | null>(null)
   const [consent, setConsent] = useState(false)
   const [files, setFiles] = useState<FileState[]>([])
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -97,7 +98,12 @@ export default function IntakePage({ onNavigate }: { onNavigate: (key: string) =
   const input = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    request<{ enabled: boolean }>('/api/extract/status').then((r) => setEnabled(r.enabled)).catch(() => setEnabled(false))
+    request<{ enabled: boolean; provider: { label: string; model: string; images: boolean } | null }>('/api/extract/status')
+      .then((r) => {
+        setEnabled(r.enabled)
+        setProvider(r.provider)
+      })
+      .catch(() => setEnabled(false))
   }, [])
 
   const reading = files.some((f) => f.status === 'reading')
@@ -252,6 +258,11 @@ export default function IntakePage({ onNavigate }: { onNavigate: (key: string) =
 
       <div className="panel">
         <h3>1. Envie os documentos</h3>
+        {provider && (
+          <p className="muted small">
+            Leitura feita por <strong>{provider.label}</strong> ({provider.model}). {provider.images ? '' : 'Este provedor lê só texto: envie PDFs com texto (fotos não funcionam). '}Para trocar, use Administração › Integrações.
+          </p>
+        )}
         <label className="consent">
           <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
           <span>

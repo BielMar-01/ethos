@@ -396,3 +396,49 @@ tr.clickable {
 .modal.titled .modal-body > .form-grid > h3:first-child {
   display: none;
 }
+
+/* ------------------------------------------------------------------ Provedores de IA */
+.provider-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.provider-chips .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 36px;
+  padding: 0.3rem 0.8rem;
+  font-weight: 500;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.provider-chips .chip.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border-color: var(--accent);
+}
+.chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.chip-dot.main {
+  background: var(--ok);
+}
+.chip-dot.on {
+  background: var(--info);
+}
+.chip-dot.off {
+  background: var(--muted);
+}
+.provider-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}

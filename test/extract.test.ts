@@ -69,6 +69,7 @@ describe("leitura de documentos por IA", () => {
     await upload(a, "/api/extract", JPEG, "image/jpeg");
     const content = (lastRequest!.messages as { content: { type: string }[] }[])[0]!.content;
     assert.equal(content[0]!.type, "image");
+    assert.equal((content[0] as unknown as { source: { media_type: string } }).source.media_type, "image/jpeg", "tipo MIME correto (já saiu image/image/jpeg)");
     await upload(a, "/api/extract", PDF, "application/pdf");
     assert.equal((lastRequest!.messages as { content: { type: string }[] }[])[0]!.content[0]!.type, "document");
     const out = lastRequest!.output_config as { format: { type: string; schema: { additionalProperties: boolean } } };
