@@ -38,9 +38,13 @@ const useMemory = process.env.ETHOS_DB === "memory";
 let pool: pg.Pool | undefined;
 let lite: PGlite | undefined;
 
+// Colunas `date` (OID 1082) como texto "AAAA-MM-DD": evita deslocamento de fuso horário.
+const DATE_OID = 1082;
+
 if (useMemory) {
-  lite = new PGlite();
+  lite = new PGlite({ parsers: { [DATE_OID]: (v: string) => v } });
 } else {
+  pg.types.setTypeParser(DATE_OID, (v: string) => v);
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL não definida (veja .env.example).");
   }
@@ -116,7 +120,11 @@ export async function closeDb(): Promise<void> {
   await lite?.close();
 }
 
-/** Código SQLSTATE 23505 = violação de UNIQUE. */
-export function isUniqueViolation(err: unknown): boolean {
-  return typeof err === "object" && err !== null && (err as { code?: string }).code === "23505";
-}
+const sqlState = (err: unknown): string | undefined =>
+  typeof err === "object" && err !== null ? (err as { code?: string }).code : undefined;
+
+/** SQLSTATE 23505 = violação de UNIQUE. */
+export const isUniqueViolation = (err: unknown): boolean => sqlState(err) === "23505";
+
+/** SQLSTATE 23503 (chave estrangeira) ou 23001 (ON DELETE RESTRICT): registro em uso. */
+export const isForeignKeyViolation = (err: unknown): boolean => ["23503", "23001"].includes(sqlState(err) ?? "");

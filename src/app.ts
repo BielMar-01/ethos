@@ -7,6 +7,7 @@ import { AuthProviderError, appUrl, getAuthProvider } from "./authProvider.js";
 import { crudRouter, parseId, type Field } from "./crud.js";
 import { RateLimiter } from "./ratelimit.js";
 import { teamRouter } from "./team.js";
+import { contractsRouter } from "./contracts.js";
 
 const MIN_PASSWORD = 8;
 const MAX_PASSWORD = 200;
@@ -238,6 +239,9 @@ export function createApp() {
 
   // ---------- Equipe: membros, convites e redefinição pelo admin ----------
   app.use("/api", teamRouter);
+
+  // ---------- Contratos ----------
+  app.use("/api", contractsRouter);
 
   // ---------- Domínio ----------
   app.use("/api/owners", crudRouter({ table: "owners", fields: personFields, orderBy: "name" }));

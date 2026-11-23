@@ -36,6 +36,69 @@ export interface InviteInfo {
   existingAccount: boolean
 }
 
+export interface Template {
+  id: number
+  name: string
+  body: string
+  version: number
+  updated_at: string
+}
+
+export type LeaseStatus = 'rascunho' | 'vigente' | 'encerrado' | 'rescindido'
+
+export interface LeaseSummary {
+  id: number
+  status: LeaseStatus
+  start_date: string
+  end_date: string
+  rent_cents: number
+  due_day: number
+  unit_id: number
+  unit_identifier: string
+  property_name: string
+  tenant_names: string | null
+}
+
+export interface LeaseDetail {
+  lease: {
+    id: number
+    unit_id: number
+    start_date: string
+    end_date: string
+    rent_cents: number
+    due_day: number
+    guarantee: string | null
+    notes: string | null
+    status: LeaseStatus
+  }
+  tenants: { id: number; name: string; document: string }[]
+  unit: { id: number; identifier: string; property_id: number; property_name: string }
+}
+
+export interface DocSummary {
+  id: number
+  template_name: string
+  template_version: number
+  created_at: string
+  generated_by_name: string | null
+}
+
+export interface DocFull extends DocSummary {
+  lease_id: number
+  content: string
+}
+
+export interface LeaseInput {
+  unit_id: number
+  start_date: string
+  end_date: string
+  rent_cents: number
+  due_day: number
+  guarantee: string | null
+  notes: string | null
+  tenantIds: number[]
+}
+
 export const ROLE_LABELS: Record<Role, string> = {
   admin: 'Administrador',
   colaborador: 'Colaborador',
@@ -85,6 +148,32 @@ export const api = {
       `/api/invitations/by-token/${encodeURIComponent(token)}/accept`,
       json('POST', { name, password }),
     ),
+
+  // Contratos
+  variables: () => request<{ variables: { key: string; label: string }[] }>('/api/contract-variables'),
+  templates: () => request<{ items: Template[] }>('/api/contract-templates'),
+  createTemplate: (name: string, body: string) =>
+    request<{ item: Template }>('/api/contract-templates', json('POST', { name, body })),
+  updateTemplate: (id: number, name: string, body: string) =>
+    request<{ item: Template }>(`/api/contract-templates/${id}`, json('PATCH', { name, body })),
+  removeTemplate: (id: number) => request<void>(`/api/contract-templates/${id}`, { method: 'DELETE' }),
+  leases: () => request<{ items: LeaseSummary[] }>('/api/leases'),
+  lease: (id: number) => request<LeaseDetail>(`/api/leases/${id}`),
+  createLease: (input: LeaseInput) => request<{ lease: { id: number } }>('/api/leases', json('POST', input)),
+  updateLease: (id: number, input: LeaseInput) =>
+    request<{ lease: { id: number } }>(`/api/leases/${id}`, json('PATCH', input)),
+  removeLease: (id: number) => request<void>(`/api/leases/${id}`, { method: 'DELETE' }),
+  setLeaseStatus: (id: number, status: LeaseStatus) =>
+    request<{ status: LeaseStatus }>(`/api/leases/${id}/status`, json('POST', { status })),
+  previewDocument: (leaseId: number, templateId: number) =>
+    request<{ content: string; template: { name: string; version: number } }>(
+      `/api/leases/${leaseId}/preview`,
+      json('POST', { templateId }),
+    ),
+  generateDocument: (leaseId: number, templateId: number) =>
+    request<{ document: { id: number } }>(`/api/leases/${leaseId}/documents`, json('POST', { templateId })),
+  documents: (leaseId: number) => request<{ items: DocSummary[] }>(`/api/leases/${leaseId}/documents`),
+  document: (id: number) => request<{ document: DocFull }>(`/api/documents/${id}`),
 
   // Equipe (admin)
   members: () => request<{ members: Member[] }>('/api/members'),

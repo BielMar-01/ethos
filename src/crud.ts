@@ -1,5 +1,5 @@
 import { Router, type Response } from "express";
-import { db, isUniqueViolation } from "./db.js";
+import { db, isForeignKeyViolation, isUniqueViolation } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 
 export type Field = {
@@ -8,7 +8,8 @@ export type Field = {
   max?: number;
 } & (
   | { kind: "string"; email?: boolean }
-  | { kind: "int"; min?: number }
+  | { kind: "int"; min?: number; maxValue?: number }
+  | { kind: "date" }
   | { kind: "enum"; values: readonly string[] }
   /** Chave estrangeira: o registro referenciado precisa ser da mesma organização. */
   | { kind: "ref"; table: string }
@@ -18,6 +19,15 @@ type Value = string | number | null;
 type Result = { values: Record<string, Value> } | { error: string };
 
 const INT4_MAX = 2_147_483_647;
+
+/** "AAAA-MM-DD" que existe no calendário (rejeita 2026-02-30). */
+export function isRealDate(s: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d;
+}
 
 /** Converte um parâmetro de rota em id válido (int4 positivo) ou undefined. */
 export function parseId(raw: unknown): number | undefined {
@@ -53,9 +63,14 @@ export async function validate(
         break;
       }
       case "int": {
-        if (typeof v !== "number" || !Number.isInteger(v) || v < (f.min ?? 0) || v > INT4_MAX) {
+        if (typeof v !== "number" || !Number.isInteger(v) || v < (f.min ?? 0) || v > (f.maxValue ?? INT4_MAX)) {
           return { error: `Número inválido: ${f.name}` };
         }
+        values[f.name] = v;
+        break;
+      }
+      case "date": {
+        if (typeof v !== "string" || !isRealDate(v)) return { error: `Data inválida: ${f.name} (use AAAA-MM-DD)` };
         values[f.name] = v;
         break;
       }
@@ -170,12 +185,21 @@ export function crudRouter({ table, fields, orderBy = "id" }: CrudOptions): Rout
 
   router.delete("/:id", requireRole("admin"), async (req, res) => {
     const id = parseId(req.params.id);
-    const deleted = id
-      ? await db.query(`DELETE FROM ${table} WHERE id = $1 AND organization_id = $2 RETURNING id`, [
-          id,
-          req.auth!.organization.id,
-        ])
-      : [];
+    let deleted: unknown[] = [];
+    try {
+      deleted = id
+        ? await db.query(`DELETE FROM ${table} WHERE id = $1 AND organization_id = $2 RETURNING id`, [
+            id,
+            req.auth!.organization.id,
+          ])
+        : [];
+    } catch (err) {
+      if (isForeignKeyViolation(err)) {
+        res.status(409).json({ error: "Registro em uso (possui contratos ou vínculos) e não pode ser excluído" });
+        return;
+      }
+      throw err;
+    }
     if (deleted.length === 0) {
       res.status(404).json({ error: "Não encontrado" });
       return;

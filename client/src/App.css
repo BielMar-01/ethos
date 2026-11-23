@@ -117,3 +117,38 @@ h3 { margin: 1.5rem 0 0.6rem; }
   padding: 0.35rem; border: none; background: transparent; color: var(--muted);
 }
 .pw-toggle:hover { color: var(--accent); }
+
+/* ---- Contratos ---- */
+.small { font-size: 0.8rem; }
+.stack { display: flex; flex-direction: column; gap: 0.8rem; }
+.inline { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+.actions.left { justify-content: flex-start; margin-top: 1rem; }
+.span-all { grid-column: 1 / -1; }
+textarea { padding: 0.55rem 0.7rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: inherit; resize: vertical; }
+textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.editor { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.85rem; line-height: 1.5; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
+.chip { font-family: ui-monospace, Consolas, monospace; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 999px; color: var(--accent); }
+fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.9rem; margin: 0; }
+legend { color: var(--muted); font-size: 0.85rem; padding: 0 0.3rem; }
+.checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.4rem; }
+.check { flex-direction: row; align-items: center; gap: 0.5rem; color: var(--text); font-size: 0.9rem; }
+.check input { width: auto; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.9rem; margin: 0; }
+.facts dt { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.facts dd { margin: 0.15rem 0 0; }
+.badge { display: inline-block; padding: 0.1rem 0.6rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; border: 1px solid currentColor; }
+.badge-rascunho { color: var(--muted); }
+.badge-vigente { color: #3fb27f; }
+.badge-encerrado { color: #5b9bd5; }
+.badge-rescindido { color: var(--danger); }
+.paper-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.paper { background: #fff; color: #111; padding: 2.5rem; border-radius: 6px; white-space: pre-wrap; font-family: Georgia, 'Times New Roman', serif; line-height: 1.6; max-width: 800px; margin: 0 auto; }
+
+@media print {
+  body { background: #fff; }
+  .no-print, aside, .content > header { display: none !important; }
+  .shell, .content, main { display: block; padding: 0; max-width: none; }
+  .panel.print-area { border: none; padding: 0; background: #fff; }
+  .paper { padding: 0; max-width: none; border-radius: 0; }
+}
