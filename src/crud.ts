@@ -1,5 +1,5 @@
-import { Router } from "express";
-import { db } from "./db.js";
+import { Router, type Response } from "express";
+import { db, isUniqueViolation } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 
 export type Field = {
@@ -17,12 +17,20 @@ export type Field = {
 type Value = string | number | null;
 type Result = { values: Record<string, Value> } | { error: string };
 
-export function validate(
+const INT4_MAX = 2_147_483_647;
+
+/** Converte um parâmetro de rota em id válido (int4 positivo) ou undefined. */
+export function parseId(raw: unknown): number | undefined {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 && n <= INT4_MAX ? n : undefined;
+}
+
+export async function validate(
   body: Record<string, unknown>,
   fields: Field[],
   organizationId: number,
   partial: boolean,
-): Result {
+): Promise<Result> {
   const values: Record<string, Value> = {};
   for (const f of fields) {
     const v = body[f.name];
@@ -45,7 +53,7 @@ export function validate(
         break;
       }
       case "int": {
-        if (typeof v !== "number" || !Number.isInteger(v) || v < (f.min ?? 0)) {
+        if (typeof v !== "number" || !Number.isInteger(v) || v < (f.min ?? 0) || v > INT4_MAX) {
           return { error: `Número inválido: ${f.name}` };
         }
         values[f.name] = v;
@@ -57,12 +65,14 @@ export function validate(
         break;
       }
       case "ref": {
-        if (typeof v !== "number" || !Number.isInteger(v)) return { error: `Referência inválida: ${f.name}` };
-        const found = db
-          .prepare(`SELECT 1 FROM ${f.table} WHERE id = ? AND organization_id = ?`)
-          .get(v, organizationId);
-        if (!found) return { error: `Referência inexistente: ${f.name}` };
-        values[f.name] = v;
+        const id = parseId(v);
+        if (id === undefined) return { error: `Referência inválida: ${f.name}` };
+        const found = await db.query(`SELECT 1 FROM ${f.table} WHERE id = $1 AND organization_id = $2`, [
+          id,
+          organizationId,
+        ]);
+        if (found.length === 0) return { error: `Referência inexistente: ${f.name}` };
+        values[f.name] = id;
         break;
       }
     }
@@ -82,30 +92,33 @@ export interface CrudOptions {
  */
 export function crudRouter({ table, fields, orderBy = "id" }: CrudOptions): Router {
   const router = Router();
-  const staff = requireRole("admin", "colaborador");
-  router.use(requireAuth, staff);
+  router.use(requireAuth, requireRole("admin", "colaborador"));
 
-  router.get("/", (req, res) => {
-    const rows = db
-      .prepare(`SELECT * FROM ${table} WHERE organization_id = ? ORDER BY ${orderBy}`)
-      .all(req.auth!.organization.id);
-    res.json({ items: rows });
+  router.get("/", async (req, res) => {
+    const items = await db.query(`SELECT * FROM ${table} WHERE organization_id = $1 ORDER BY ${orderBy}`, [
+      req.auth!.organization.id,
+    ]);
+    res.json({ items });
   });
 
-  router.get("/:id", (req, res) => {
-    const row = db
-      .prepare(`SELECT * FROM ${table} WHERE id = ? AND organization_id = ?`)
-      .get(Number(req.params.id), req.auth!.organization.id);
-    if (!row) {
+  router.get("/:id", async (req, res) => {
+    const id = parseId(req.params.id);
+    const [item] = id
+      ? await db.query(`SELECT * FROM ${table} WHERE id = $1 AND organization_id = $2`, [
+          id,
+          req.auth!.organization.id,
+        ])
+      : [];
+    if (!item) {
       res.status(404).json({ error: "Não encontrado" });
       return;
     }
-    res.json({ item: row });
+    res.json({ item });
   });
 
-  router.post("/", (req, res) => {
+  router.post("/", async (req, res) => {
     const orgId = req.auth!.organization.id;
-    const result = validate(req.body ?? {}, fields, orgId, false);
+    const result = await validate(req.body ?? {}, fields, orgId, false);
     if ("error" in result) {
       res.status(400).json({ error: result.error });
       return;
@@ -113,25 +126,27 @@ export function crudRouter({ table, fields, orderBy = "id" }: CrudOptions): Rout
     const cols = ["organization_id", ...Object.keys(result.values)];
     const vals = [orgId, ...Object.values(result.values)];
     try {
-      const info = db
-        .prepare(`INSERT INTO ${table} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
-        .run(...vals);
-      const item = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(Number(info.lastInsertRowid));
+      const [item] = await db.query(
+        `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(", ")}) RETURNING *`,
+        vals,
+      );
       res.status(201).json({ item });
     } catch (err) {
       sendDbError(res, err);
     }
   });
 
-  router.patch("/:id", (req, res) => {
+  router.patch("/:id", async (req, res) => {
     const orgId = req.auth!.organization.id;
-    const id = Number(req.params.id);
-    const existing = db.prepare(`SELECT 1 FROM ${table} WHERE id = ? AND organization_id = ?`).get(id, orgId);
-    if (!existing) {
+    const id = parseId(req.params.id);
+    const existing = id
+      ? await db.query(`SELECT 1 FROM ${table} WHERE id = $1 AND organization_id = $2`, [id, orgId])
+      : [];
+    if (existing.length === 0) {
       res.status(404).json({ error: "Não encontrado" });
       return;
     }
-    const result = validate(req.body ?? {}, fields, orgId, true);
+    const result = await validate(req.body ?? {}, fields, orgId, true);
     if ("error" in result) {
       res.status(400).json({ error: result.error });
       return;
@@ -142,22 +157,26 @@ export function crudRouter({ table, fields, orderBy = "id" }: CrudOptions): Rout
       return;
     }
     try {
-      db.prepare(`UPDATE ${table} SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ? AND organization_id = ?`).run(
-        ...Object.values(result.values),
-        id,
-        orgId,
+      const sets = cols.map((c, i) => `${c} = $${i + 1}`).join(", ");
+      const [item] = await db.query(
+        `UPDATE ${table} SET ${sets} WHERE id = $${cols.length + 1} AND organization_id = $${cols.length + 2} RETURNING *`,
+        [...Object.values(result.values), id, orgId],
       );
-      res.json({ item: db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id) });
+      res.json({ item });
     } catch (err) {
       sendDbError(res, err);
     }
   });
 
-  router.delete("/:id", requireRole("admin"), (req, res) => {
-    const info = db
-      .prepare(`DELETE FROM ${table} WHERE id = ? AND organization_id = ?`)
-      .run(Number(req.params.id), req.auth!.organization.id);
-    if (info.changes === 0) {
+  router.delete("/:id", requireRole("admin"), async (req, res) => {
+    const id = parseId(req.params.id);
+    const deleted = id
+      ? await db.query(`DELETE FROM ${table} WHERE id = $1 AND organization_id = $2 RETURNING id`, [
+          id,
+          req.auth!.organization.id,
+        ])
+      : [];
+    if (deleted.length === 0) {
       res.status(404).json({ error: "Não encontrado" });
       return;
     }
@@ -167,12 +186,10 @@ export function crudRouter({ table, fields, orderBy = "id" }: CrudOptions): Rout
   return router;
 }
 
-function sendDbError(res: import("express").Response, err: unknown): void {
-  const message = err instanceof Error ? err.message : "";
-  if (message.includes("UNIQUE")) {
+function sendDbError(res: Response, err: unknown): void {
+  if (isUniqueViolation(err)) {
     res.status(409).json({ error: "Registro duplicado" });
     return;
   }
-  console.error(err);
-  res.status(500).json({ error: "Erro interno" });
+  throw err; // vai ao tratador de erros global (500 genérico, sem vazar detalhes)
 }

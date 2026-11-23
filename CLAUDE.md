@@ -18,18 +18,19 @@ Plataforma SaaS (futuro PWA) de administração de imóveis residenciais. Contex
 Repositório: https://github.com/BielMar-01/ethos (branch `main`). Pasta local: `C:\Projetos\ethos`. Estrutura **plana** (não é monorepo `apps/api`).
 
 **Implementado**
-- Back-end: Node 24 + **Express 5** + **TypeScript** (strict, NodeNext, saída CommonJS; imports internos com sufixo `.js`). Banco **SQLite nativo** (`node:sqlite`, arquivo `data/ethos.db`, ignorado no git; `ETHOS_DB=:memory:` nos testes). Schema criado em `src/db.ts` (`CREATE TABLE IF NOT EXISTS`; **ainda não há sistema de migrações**).
+- Back-end: Node 24 + **Express 5** + **TypeScript** (strict, NodeNext, saída CommonJS; imports internos com sufixo `.js`). Banco **PostgreSQL no Supabase**, acessado só pelo back-end via `pg` (`DATABASE_URL` no `.env`, ignorado no git; modelo em `.env.example`). Migrações SQL em `migrations/*.sql`, aplicadas em ordem por `npm run db:migrate` (e no start do servidor), registradas em `schema_migrations`. **RLS ativado sem políticas** em todas as tabelas: a publishable key não lê nada pela API REST do Supabase; a conexão do servidor (role `postgres`) ignora RLS, então o isolamento por organização é feito **nas queries** (`organization_id` da sessão). Testes usam Postgres em memória (**PGlite**, `ETHOS_DB=memory`) e nunca tocam o banco real.
 - Multitenancy: `organizations`, `organization_members` (papel por organização: `admin`, `colaborador`, `proprietario`, `inquilino`). A organização vem **sempre da sessão** (`req.auth`), nunca do cliente.
 - Auth (`src/auth.ts`): senha com `scrypt`, sessão em cookie `httpOnly` + `sameSite=lax` (7 dias, tabela `sessions`). O cadastro público cria uma nova organização e o usuário vira `admin`.
 - Domínio (CRUD escopado por organização via `src/crud.ts`): proprietários, imóveis, unidades (imóvel ≠ unidade locável), inquilinos; proprietários de um imóvel (N:N) em `/api/properties/:id/owners`. Leitura/escrita: `admin` e `colaborador`; exclusão: só `admin`.
 - Front-end (`client/`): React 19 + Vite + TypeScript. Login/cadastro, sidebar, `ResourcePage` genérica configurada em `client/src/resources.ts`. Tema escuro com destaque dourado usando **tokens provisórios** (`client/src/index.css`).
 - Testes: `npm test` (`node:test` + `tsx`, em `test/`) — autenticação, isolamento entre organizações, permissões, validação.
-- Scripts: `npm run dev:server`, `npm run dev:client` (proxy `/api` → :3000), `npm run build`, `npm start` (serve também `client/dist`), `npm test`.
+- Scripts: `npm run dev:server`, `npm run dev:client` (proxy `/api` → :3000), `npm run build`, `npm start` (serve também `client/dist`), `npm run db:migrate`, `npm test`.
 
-**Planejado, mas NÃO implementado** (não presumir): contratos, financeiro, vistorias, manutenção, documentos, comunicados, relatórios, dashboard, convites/RBAC granular, recuperação de senha, MFA, rate limit de login, proteção CSRF dedicada, auditoria, PWA, tela para proprietário/inquilino, migrações, `.env`.
+**Planejado, mas NÃO implementado** (não presumir): contratos, financeiro, vistorias, manutenção, documentos, comunicados, relatórios, dashboard, convites/RBAC granular, recuperação de senha, MFA, rate limit de login, proteção CSRF dedicada, auditoria, PWA, tela para proprietário/inquilino.
 
 **Divergências conhecidas com a documentação**
-- `docs/` cita **Supabase + PostgreSQL** e `apps/api`; o código usa **SQLite** por simplicidade inicial. A migração para PostgreSQL (e RLS) é uma decisão pendente — preferível antes de haver dados reais. Confirmar com o usuário antes de avançar nos módulos financeiros/contratos.
+- `docs/` cita `apps/api`; o código usa estrutura plana (`src/` + `client/`). Supabase é usado **apenas como PostgreSQL gerenciado**: a autenticação é própria (`src/auth.ts`), não o Supabase Auth — `SUPABASE_JWKS_URL` e a publishable key estão no `.env` mas **não são usadas** hoje. Decisão pendente: manter auth própria ou migrar para Supabase Auth.
+- `SUPABASE_SECRET_KEY` (chave administrativa): só no servidor, nunca no front-end nem em commits.
 - Valores monetários são guardados em **centavos** (inteiros).
 - Nunca presuma que uma tecnologia está implementada só porque foi planejada.
 

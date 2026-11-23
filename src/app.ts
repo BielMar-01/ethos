@@ -1,7 +1,7 @@
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 import path from "node:path";
 import fs from "node:fs";
-import { db, transaction, type Role } from "./db.js";
+import { db, transaction, isUniqueViolation, type Role } from "./db.js";
 import {
   createSession,
   destroySession,
@@ -11,7 +11,7 @@ import {
   requireRole,
   verifyPassword,
 } from "./auth.js";
-import { crudRouter, type Field } from "./crud.js";
+import { crudRouter, parseId, type Field } from "./crud.js";
 
 const PROPERTY_TYPES = ["casa", "apartamento", "terreno", "comercial", "outro"] as const;
 const UNIT_STATUS = ["disponivel", "ocupada", "manutencao"] as const;
@@ -34,72 +34,78 @@ export function createApp() {
   });
 
   // ---------- Autenticação ----------
-  app.post("/api/auth/register", (req, res) => {
+  app.post("/api/auth/register", async (req, res) => {
     const { name, email, password, organizationName } = req.body ?? {};
     if (typeof name !== "string" || typeof email !== "string" || typeof password !== "string") {
       res.status(400).json({ error: "Dados inválidos" });
       return;
     }
     const cleanEmail = email.trim().toLowerCase();
-    if (!name.trim() || !/^\S+@\S+\.\S+$/.test(cleanEmail) || password.length < 8) {
+    if (!name.trim() || !/^\S+@\S+\.\S+$/.test(cleanEmail) || password.length < 8 || password.length > 200) {
       res.status(400).json({ error: "Informe nome, e-mail válido e senha com 8+ caracteres" });
       return;
     }
-    if (db.prepare("SELECT 1 FROM users WHERE email = ?").get(cleanEmail)) {
-      res.status(409).json({ error: "E-mail já cadastrado" });
-      return;
-    }
     const orgName =
-      typeof organizationName === "string" && organizationName.trim() ? organizationName.trim() : name.trim();
+      typeof organizationName === "string" && organizationName.trim()
+        ? organizationName.trim().slice(0, 200)
+        : name.trim();
     // Cadastro público cria uma nova organização e o usuário vira seu administrador.
-    const { userId, orgId } = transaction(() => {
-      const org = db.prepare("INSERT INTO organizations (name) VALUES (?)").run(orgName);
-      const user = db
-        .prepare("INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)")
-        .run(name.trim(), cleanEmail, hashPassword(password));
-      const orgId = Number(org.lastInsertRowid);
-      const userId = Number(user.lastInsertRowid);
-      db.prepare("INSERT INTO organization_members (organization_id, user_id, role) VALUES (?, ?, 'admin')").run(
-        orgId,
-        userId,
-      );
-      return { userId, orgId };
-    });
-    createSession(res, userId, orgId);
+    let created: { userId: number; orgId: number };
+    try {
+      created = await transaction(async (tx) => {
+        const [org] = await tx.query<{ id: number }>("INSERT INTO organizations (name) VALUES ($1) RETURNING id", [
+          orgName,
+        ]);
+        const [user] = await tx.query<{ id: number }>(
+          "INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
+          [name.trim(), cleanEmail, hashPassword(password)],
+        );
+        await tx.query("INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1, $2, 'admin')", [
+          org!.id,
+          user!.id,
+        ]);
+        return { userId: user!.id, orgId: org!.id };
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        res.status(409).json({ error: "E-mail já cadastrado" });
+        return;
+      }
+      throw err;
+    }
+    await createSession(res, created.userId, created.orgId);
     res.status(201).json({
-      user: { id: userId, name: name.trim(), email: cleanEmail },
-      organization: { id: orgId, name: orgName },
+      user: { id: created.userId, name: name.trim(), email: cleanEmail },
+      organization: { id: created.orgId, name: orgName },
       role: "admin" satisfies Role,
     });
   });
 
-  app.post("/api/auth/login", (req, res) => {
+  app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body ?? {};
     if (typeof email !== "string" || typeof password !== "string") {
       res.status(400).json({ error: "Dados inválidos" });
       return;
     }
-    const user = db
-      .prepare("SELECT id, name, email, password_hash FROM users WHERE email = ?")
-      .get(email.trim().toLowerCase()) as unknown as
-      | { id: number; name: string; email: string; password_hash: string }
-      | undefined;
+    const [user] = await db.query<{ id: number; name: string; email: string; password_hash: string }>(
+      "SELECT id, name, email, password_hash FROM users WHERE email = $1",
+      [email.trim().toLowerCase()],
+    );
     if (!user || !verifyPassword(password, user.password_hash)) {
       res.status(401).json({ error: "E-mail ou senha incorretos" });
       return;
     }
-    const membership = db
-      .prepare(
-        `SELECT o.id, o.name, m.role FROM organization_members m
-         JOIN organizations o ON o.id = m.organization_id
-         WHERE m.user_id = ? ORDER BY m.id LIMIT 1`,
-      )
-      .get(user.id) as unknown as { id: number; name: string; role: Role } | undefined;
+    const [membership] = await db.query<{ id: number; name: string; role: Role }>(
+      `SELECT o.id, o.name, m.role FROM organization_members m
+       JOIN organizations o ON o.id = m.organization_id
+       WHERE m.user_id = $1 ORDER BY m.id LIMIT 1`,
+      [user.id],
+    );
     if (!membership) {
       res.status(403).json({ error: "Usuário sem organização" });
       return;
     }
-    createSession(res, user.id, membership.id);
+    await createSession(res, user.id, membership.id);
     res.json({
       user: { id: user.id, name: user.name, email: user.email },
       organization: { id: membership.id, name: membership.name },
@@ -107,8 +113,8 @@ export function createApp() {
     });
   });
 
-  app.post("/api/auth/logout", (req, res) => {
-    destroySession(req, res);
+  app.post("/api/auth/logout", async (req, res) => {
+    await destroySession(req, res);
     res.status(204).end();
   });
 
@@ -117,14 +123,13 @@ export function createApp() {
   });
 
   // ---------- Organização ----------
-  app.get("/api/members", requireAuth, requireRole("admin"), (req, res) => {
-    const members = db
-      .prepare(
-        `SELECT u.id, u.name, u.email, m.role FROM organization_members m
-         JOIN users u ON u.id = m.user_id
-         WHERE m.organization_id = ? ORDER BY u.id`,
-      )
-      .all(req.auth!.organization.id);
+  app.get("/api/members", requireAuth, requireRole("admin"), async (req, res) => {
+    const members = await db.query(
+      `SELECT u.id, u.name, u.email, m.role FROM organization_members m
+       JOIN users u ON u.id = m.user_id
+       WHERE m.organization_id = $1 ORDER BY u.id`,
+      [req.auth!.organization.id],
+    );
     res.json({ members });
   });
 
@@ -152,44 +157,51 @@ export function createApp() {
   );
 
   // Proprietários de um imóvel (N:N). Ambos precisam ser da organização da sessão.
-  app.put("/api/properties/:id/owners", requireAuth, requireRole("admin", "colaborador"), (req, res) => {
+  app.put("/api/properties/:id/owners", requireAuth, requireRole("admin", "colaborador"), async (req, res) => {
     const orgId = req.auth!.organization.id;
-    const propertyId = Number(req.params.id);
+    const propertyId = parseId(req.params.id);
     const ownerIds: unknown = req.body?.ownerIds;
-    if (!Array.isArray(ownerIds) || !ownerIds.every((n) => Number.isInteger(n))) {
+    if (!Array.isArray(ownerIds) || !ownerIds.every((n) => parseId(n) !== undefined)) {
       res.status(400).json({ error: "ownerIds deve ser uma lista de inteiros" });
       return;
     }
-    if (!db.prepare("SELECT 1 FROM properties WHERE id = ? AND organization_id = ?").get(propertyId, orgId)) {
+    const property = propertyId
+      ? await db.query("SELECT 1 FROM properties WHERE id = $1 AND organization_id = $2", [propertyId, orgId])
+      : [];
+    if (property.length === 0) {
       res.status(404).json({ error: "Não encontrado" });
       return;
     }
     const unique = [...new Set(ownerIds as number[])];
-    for (const ownerId of unique) {
-      if (!db.prepare("SELECT 1 FROM owners WHERE id = ? AND organization_id = ?").get(ownerId, orgId)) {
-        res.status(400).json({ error: "Proprietário inexistente" });
-        return;
-      }
+    const found = await db.query<{ id: number }>(
+      "SELECT id FROM owners WHERE organization_id = $1 AND id = ANY($2::int[])",
+      [orgId, unique],
+    );
+    if (found.length !== unique.length) {
+      res.status(400).json({ error: "Proprietário inexistente" });
+      return;
     }
-    transaction(() => {
-      db.prepare("DELETE FROM property_owners WHERE property_id = ?").run(propertyId);
+    await transaction(async (tx) => {
+      await tx.query("DELETE FROM property_owners WHERE property_id = $1", [propertyId]);
       for (const ownerId of unique) {
-        db.prepare("INSERT INTO property_owners (property_id, owner_id) VALUES (?, ?)").run(propertyId, ownerId);
+        await tx.query("INSERT INTO property_owners (property_id, owner_id) VALUES ($1, $2)", [propertyId, ownerId]);
       }
     });
     res.json({ ownerIds: unique });
   });
 
-  app.get("/api/properties/:id/owners", requireAuth, requireRole("admin", "colaborador"), (req, res) => {
-    const rows = db
-      .prepare(
-        `SELECT o.* FROM property_owners po
-         JOIN owners o ON o.id = po.owner_id
-         JOIN properties p ON p.id = po.property_id
-         WHERE po.property_id = ? AND p.organization_id = ?`,
-      )
-      .all(Number(req.params.id), req.auth!.organization.id);
-    res.json({ items: rows });
+  app.get("/api/properties/:id/owners", requireAuth, requireRole("admin", "colaborador"), async (req, res) => {
+    const propertyId = parseId(req.params.id);
+    const items = propertyId
+      ? await db.query(
+          `SELECT o.* FROM property_owners po
+           JOIN owners o ON o.id = po.owner_id
+           JOIN properties p ON p.id = po.property_id
+           WHERE po.property_id = $1 AND p.organization_id = $2`,
+          [propertyId, req.auth!.organization.id],
+        )
+      : [];
+    res.json({ items });
   });
 
   app.use(
@@ -221,6 +233,16 @@ export function createApp() {
       res.sendFile(path.join(clientDist, "index.html"));
     });
   }
+
+  const onError: ErrorRequestHandler = (err, _req, res, _next) => {
+    if (err?.type === "entity.parse.failed") {
+      res.status(400).json({ error: "JSON inválido" });
+      return;
+    }
+    console.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  };
+  app.use(onError);
 
   return app;
 }

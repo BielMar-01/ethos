@@ -1,116 +1,17 @@
-import { DatabaseSync } from "node:sqlite";
-import path from "node:path";
 import fs from "node:fs";
+import path from "node:path";
+import pg from "pg";
+import { PGlite } from "@electric-sql/pglite";
 
-// ETHOS_DB=:memory: é usado nos testes.
-const dbPath = process.env.ETHOS_DB ?? path.join(process.cwd(), "data", "ethos.db");
-if (dbPath !== ":memory:") fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-export const db = new DatabaseSync(dbPath);
+// Carrega .env se existir (Node 20+). Variáveis já definidas no ambiente prevalecem.
+try {
+  process.loadEnvFile(path.join(process.cwd(), ".env"));
+} catch {
+  /* sem .env: usa o ambiente */
+}
 
 export const ROLES = ["admin", "colaborador", "proprietario", "inquilino"] as const;
 export type Role = (typeof ROLES)[number];
-
-db.exec(`
-  PRAGMA foreign_keys = ON;
-
-  CREATE TABLE IF NOT EXISTS organizations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  -- Um usuário pode ter vínculos e papéis diferentes em organizações diferentes.
-  CREATE TABLE IF NOT EXISTS organization_members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role TEXT NOT NULL CHECK (role IN ('admin','colaborador','proprietario','inquilino')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (organization_id, user_id)
-  );
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    expires_at INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS owners (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    document TEXT NOT NULL,
-    email TEXT,
-    phone TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (organization_id, document)
-  );
-
-  CREATE TABLE IF NOT EXISTS properties (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL CHECK (type IN ('casa','apartamento','terreno','comercial','outro')),
-    street TEXT, number TEXT, complement TEXT, neighborhood TEXT,
-    city TEXT, state TEXT, zip TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  -- Um imóvel pode ter mais de um proprietário.
-  CREATE TABLE IF NOT EXISTS property_owners (
-    property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
-    owner_id INTEGER NOT NULL REFERENCES owners(id) ON DELETE CASCADE,
-    PRIMARY KEY (property_id, owner_id)
-  );
-
-  -- Unidade locável: um imóvel pode ter várias (ex.: terreno com dez casas).
-  CREATE TABLE IF NOT EXISTS units (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
-    identifier TEXT NOT NULL,
-    area_m2 INTEGER,
-    bedrooms INTEGER,
-    rent_reference_cents INTEGER,
-    status TEXT NOT NULL DEFAULT 'disponivel' CHECK (status IN ('disponivel','ocupada','manutencao')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (property_id, identifier)
-  );
-
-  CREATE TABLE IF NOT EXISTS tenants (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    document TEXT NOT NULL,
-    email TEXT,
-    phone TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (organization_id, document)
-  );
-`);
-
-/** Executa fn dentro de uma transação; faz rollback se lançar. */
-export function transaction<T>(fn: () => T): T {
-  db.exec("BEGIN");
-  try {
-    const result = fn();
-    db.exec("COMMIT");
-    return result;
-  } catch (err) {
-    db.exec("ROLLBACK");
-    throw err;
-  }
-}
 
 export interface User {
   id: number;
@@ -122,4 +23,100 @@ export interface AuthContext {
   user: User;
   organization: { id: number; name: string };
   role: Role;
+}
+
+/** Interface mínima comum ao pool (produção) e ao PGlite (testes). */
+export interface Queryable {
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
+  /** Executa um script com vários comandos, sem parâmetros (migrações). */
+  exec(sql: string): Promise<void>;
+}
+
+// ETHOS_DB=memory usa um Postgres em memória (PGlite) — apenas para testes.
+const useMemory = process.env.ETHOS_DB === "memory";
+
+let pool: pg.Pool | undefined;
+let lite: PGlite | undefined;
+
+if (useMemory) {
+  lite = new PGlite();
+} else {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL não definida (veja .env.example).");
+  }
+  pool = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }, // Supabase exige TLS
+    max: 10,
+  });
+}
+
+export const db: Queryable = {
+  async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+    if (lite) return (await lite.query<T>(sql, params)).rows;
+    return (await pool!.query(sql, params)).rows as T[];
+  },
+  async exec(sql: string): Promise<void> {
+    if (lite) await lite.exec(sql);
+    else await pool!.query(sql);
+  },
+};
+
+/** Executa fn em uma transação; faz rollback se lançar. */
+export async function transaction<T>(fn: (tx: Queryable) => Promise<T>): Promise<T> {
+  if (lite) {
+    return lite.transaction((tx) =>
+      fn({
+        query: async (sql, params = []) => (await tx.query(sql, params)).rows as never,
+        exec: async (sql) => void (await tx.exec(sql)),
+      }),
+    );
+  }
+  const client = await pool!.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn({
+      query: async (sql, params = []) => (await client.query(sql, params)).rows as never,
+      exec: async (sql) => void (await client.query(sql)),
+    });
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Aplica, em ordem, os arquivos migrations/*.sql ainda não registrados. */
+export async function migrate(): Promise<string[]> {
+  await db.query(
+    "CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
+  );
+  if (!useMemory) await db.query("ALTER TABLE schema_migrations ENABLE ROW LEVEL SECURITY");
+  const dir = path.join(process.cwd(), "migrations");
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
+  const applied = new Set((await db.query<{ name: string }>("SELECT name FROM schema_migrations")).map((r) => r.name));
+  const ran: string[] = [];
+  for (const file of files) {
+    if (applied.has(file)) continue;
+    const sql = fs.readFileSync(path.join(dir, file), "utf8");
+    await transaction(async (tx) => {
+      await tx.exec(sql);
+      await tx.query("INSERT INTO schema_migrations (name) VALUES ($1)", [file]);
+    });
+    ran.push(file);
+  }
+  return ran;
+}
+
+export async function closeDb(): Promise<void> {
+  await pool?.end();
+  await lite?.close();
+}
+
+/** Código SQLSTATE 23505 = violação de UNIQUE. */
+export function isUniqueViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: string }).code === "23505";
 }

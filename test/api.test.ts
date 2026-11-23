@@ -1,4 +1,5 @@
-process.env.ETHOS_DB = ":memory:";
+// Postgres em memória (PGlite): os testes nunca tocam o banco real.
+process.env.ETHOS_DB = "memory";
 
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -9,13 +10,17 @@ let server: Server;
 let base: string;
 
 before(async () => {
+  const { migrate } = await import("../src/db.js");
+  await migrate();
   const { createApp } = await import("../src/app.js");
   server = createApp().listen(0);
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
-after(() => {
+after(async () => {
   server.close();
+  const { closeDb } = await import("../src/db.js");
+  await closeDb();
 });
 
 /** Cliente mínimo que guarda o cookie de sessão. */
@@ -153,6 +158,19 @@ describe("domínio e isolamento entre organizações", () => {
     assert.equal((await a.call("POST", "/api/units", { property_id: prop.id, identifier: "Casa 1" })).status, 409);
   });
 
+  it("ids malformados devolvem 404 (não 500) e JSON inválido devolve 400", async () => {
+    const a = await registerClient("ids@org.com", "Org Ids");
+    assert.equal((await a.call("GET", "/api/properties/abc")).status, 404);
+    assert.equal((await a.call("GET", "/api/properties/99999999999")).status, 404);
+    assert.equal((await a.call("DELETE", "/api/units/-1")).status, 404);
+    const raw = await fetch(base + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{quebrado",
+    });
+    assert.equal(raw.status, 400);
+  });
+
   it("apagar imóvel remove suas unidades em cascata", async () => {
     const a = await registerClient("k@org.com", "Org K");
     const prop = (await a.call("POST", "/api/properties", { name: "P", type: "casa" })).body.item;
@@ -174,7 +192,7 @@ describe("permissões por papel", () => {
     const { db } = await import("../src/db.js");
     const a = await registerClient("m@org.com", "Org M");
     const me = (await a.call("GET", "/api/auth/me")).body;
-    db.prepare("UPDATE organization_members SET role = 'inquilino' WHERE user_id = ?").run(me.user.id);
+    await db.query("UPDATE organization_members SET role = 'inquilino' WHERE user_id = $1", [me.user.id]);
     assert.equal((await a.call("GET", "/api/properties")).status, 403);
     assert.equal((await a.call("GET", "/api/members")).status, 403);
   });
@@ -184,7 +202,7 @@ describe("permissões por papel", () => {
     const a = await registerClient("n@org.com", "Org N");
     const item = (await a.call("POST", "/api/tenants", { name: "T", document: "1" })).body.item;
     const me = (await a.call("GET", "/api/auth/me")).body;
-    db.prepare("UPDATE organization_members SET role = 'colaborador' WHERE user_id = ?").run(me.user.id);
+    await db.query("UPDATE organization_members SET role = 'colaborador' WHERE user_id = $1", [me.user.id]);
     assert.equal((await a.call("POST", "/api/tenants", { name: "T2", document: "2" })).status, 201);
     assert.equal((await a.call("DELETE", `/api/tenants/${item.id}`)).status, 403);
   });

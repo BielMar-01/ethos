@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { db, type AuthContext, type Role } from "./db.js";
+// loadAuth é async: o Express 5 encaminha rejeições ao tratador de erros.
 
 const SESSION_COOKIE = "ethos_sid";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -19,14 +20,14 @@ export function verifyPassword(password: string, stored: string): boolean {
   return crypto.timingSafeEqual(actual, expected);
 }
 
-export function createSession(res: Response, userId: number, organizationId: number): void {
+export async function createSession(res: Response, userId: number, organizationId: number): Promise<void> {
   const id = crypto.randomBytes(32).toString("hex");
-  db.prepare("INSERT INTO sessions (id, user_id, organization_id, expires_at) VALUES (?, ?, ?, ?)").run(
+  await db.query("INSERT INTO sessions (id, user_id, organization_id, expires_at) VALUES ($1, $2, $3, $4)", [
     id,
     userId,
     organizationId,
-    Date.now() + SESSION_TTL_MS,
-  );
+    new Date(Date.now() + SESSION_TTL_MS),
+  ]);
   res.cookie(SESSION_COOKIE, id, {
     httpOnly: true,
     sameSite: "lax",
@@ -35,9 +36,9 @@ export function createSession(res: Response, userId: number, organizationId: num
   });
 }
 
-export function destroySession(req: Request, res: Response): void {
+export async function destroySession(req: Request, res: Response): Promise<void> {
   const id = readCookie(req, SESSION_COOKIE);
-  if (id) db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+  if (id) await db.query("DELETE FROM sessions WHERE id = $1", [id]);
   res.clearCookie(SESSION_COOKIE);
 }
 
@@ -67,20 +68,19 @@ interface SessionRow {
   role: Role;
 }
 
-export function loadAuth(req: Request, _res: Response, next: NextFunction): void {
+export async function loadAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const id = readCookie(req, SESSION_COOKIE);
   if (id) {
-    const row = db
-      .prepare(
-        `SELECT u.id AS user_id, u.name AS user_name, u.email,
-                o.id AS organization_id, o.name AS organization_name, m.role
-         FROM sessions s
-         JOIN users u ON u.id = s.user_id
-         JOIN organizations o ON o.id = s.organization_id
-         JOIN organization_members m ON m.user_id = u.id AND m.organization_id = o.id
-         WHERE s.id = ? AND s.expires_at > ?`,
-      )
-      .get(id, Date.now()) as unknown as SessionRow | undefined;
+    const [row] = await db.query<SessionRow>(
+      `SELECT u.id AS user_id, u.name AS user_name, u.email,
+              o.id AS organization_id, o.name AS organization_name, m.role
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       JOIN organizations o ON o.id = s.organization_id
+       JOIN organization_members m ON m.user_id = u.id AND m.organization_id = o.id
+       WHERE s.id = $1 AND s.expires_at > now()`,
+      [id],
+    );
     if (row) {
       req.auth = {
         user: { id: row.user_id, name: row.user_name, email: row.email },
