@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { api, type InviteInfo, type Session } from './api'
 import PasswordInput from './PasswordInput'
 import ResourcePage from './ResourcePage'
+import FinancePage from './FinancePage'
 import LeasesPage from './LeasesPage'
 import TeamPage from './TeamPage'
 import TemplatesPage from './TemplatesPage'
@@ -245,6 +246,7 @@ function AcceptInvite({ token, onAuth, onCancel }: { token: string; onAuth: (s: 
 const STAFF = ['admin', 'colaborador']
 const TEAM = 'team'
 const LEASES = 'leases'
+const FINANCE = 'finance'
 const TEMPLATES = 'templates'
 
 function Shell({ session, onLogout, onSession }: { session: Session; onLogout: () => void; onSession: (s: Session) => void }) {
@@ -282,6 +284,9 @@ function Shell({ session, onLogout, onSession }: { session: Session; onLogout: (
             <>
               <button className={current === LEASES ? 'nav active' : 'nav'} onClick={() => setCurrent(LEASES)}>
                 Contratos
+              </button>
+              <button className={current === FINANCE ? 'nav active' : 'nav'} onClick={() => setCurrent(FINANCE)}>
+                Financeiro
               </button>
               <button className={current === TEMPLATES ? 'nav active' : 'nav'} onClick={() => setCurrent(TEMPLATES)}>
                 Modelos
@@ -323,6 +328,8 @@ function Shell({ session, onLogout, onSession }: { session: Session; onLogout: (
             <TeamPage key={`team-${session.organization.id}`} currentUserId={session.user.id} />
           ) : current === LEASES && isStaff ? (
             <LeasesPage key={`leases-${session.organization.id}`} isAdmin={isAdmin} />
+          ) : current === FINANCE && isStaff ? (
+            <FinancePage key={`finance-${session.organization.id}`} isAdmin={isAdmin} />
           ) : current === TEMPLATES && isStaff ? (
             <TemplatesPage key={`templates-${session.organization.id}`} canDelete={isAdmin} />
           ) : isStaff && def ? (

@@ -88,6 +88,61 @@ export interface DocFull extends DocSummary {
   content: string
 }
 
+export type ChargeStatus = 'aberta' | 'parcial' | 'vencida' | 'paga' | 'cancelada'
+
+export interface Charge {
+  id: number
+  lease_id: number
+  kind: string
+  description: string
+  competence: string
+  due_date: string
+  amount_cents: number
+  paid_cents: number
+  status: ChargeStatus
+  unit_identifier: string
+  property_name: string
+  tenant_names: string | null
+}
+
+export interface Payment {
+  id: number
+  lease_id: number
+  received_at: string
+  amount_cents: number
+  method: string
+  reference: string | null
+  receipt_number: number
+  voided_at: string | null
+  void_reason: string | null
+  unit_identifier: string
+  property_name: string
+  tenant_names: string | null
+}
+
+export interface Transfer {
+  id: number
+  owner_id: number
+  owner_name: string
+  period: string
+  gross_cents: number
+  fee_cents: number
+  net_cents: number
+  fee_bps: number
+  status: 'pendente' | 'pago'
+  paid_at: string | null
+}
+
+export interface FinanceSummary {
+  month: string
+  expected_cents: number
+  received_cents: number
+  received_ratio: number | null
+  overdue_cents: number
+  overdue_count: number
+  cash_received_cents: number
+}
+
 export interface LeaseInput {
   unit_id: number
   start_date: string
@@ -174,6 +229,29 @@ export const api = {
     request<{ document: { id: number } }>(`/api/leases/${leaseId}/documents`, json('POST', { templateId })),
   documents: (leaseId: number) => request<{ items: DocSummary[] }>(`/api/leases/${leaseId}/documents`),
   document: (id: number) => request<{ document: DocFull }>(`/api/documents/${id}`),
+
+  // Financeiro
+  financeSummary: (month: string) => request<FinanceSummary>(`/api/finance/summary?month=${month}`),
+  charges: (query: string) => request<{ items: Charge[] }>(`/api/charges?${query}`),
+  generateCharges: (month: string) =>
+    request<{ eligible: number; created: number; skipped: number }>('/api/charges/generate', json('POST', { month })),
+  createCharge: (body: Record<string, unknown>) => request<{ item: Charge }>('/api/charges', json('POST', body)),
+  cancelCharge: (id: number) => request<void>(`/api/charges/${id}/cancel`, { method: 'POST' }),
+  payments: (month: string) => request<{ items: Payment[] }>(`/api/payments?month=${month}`),
+  payment: (id: number) =>
+    request<{ payment: Payment & { receipt_content: string }; allocations: { charge_id: number; amount_cents: number; description: string }[] }>(
+      `/api/payments/${id}`,
+    ),
+  createPayment: (body: Record<string, unknown>) =>
+    request<{ payment: { id: number; receipt_number: number } }>('/api/payments', json('POST', body)),
+  voidPayment: (id: number, reason: string) => request<void>(`/api/payments/${id}/void`, json('POST', { reason })),
+  transfers: (period: string) => request<{ items: Transfer[] }>(`/api/transfers?period=${period}`),
+  generateTransfers: (period: string) =>
+    request<{ generated: number; alreadyPaid: number; withoutOwnerCents: number }>('/api/transfers/generate', json('POST', { period })),
+  payTransfer: (id: number) => request<void>(`/api/transfers/${id}/pay`, json('POST', {})),
+  financeSettings: () => request<{ admin_fee_bps: number }>('/api/settings/finance'),
+  saveFinanceSettings: (admin_fee_bps: number) =>
+    request<{ admin_fee_bps: number }>('/api/settings/finance', json('PUT', { admin_fee_bps })),
 
   // Equipe (admin)
   members: () => request<{ members: Member[] }>('/api/members'),

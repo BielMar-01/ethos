@@ -152,3 +152,25 @@ legend { color: var(--muted); font-size: 0.85rem; padding: 0 0.3rem; }
   .panel.print-area { border: none; padding: 0; background: #fff; }
   .paper { padding: 0; max-width: none; border-radius: 0; }
 }
+
+/* ---- Financeiro ---- */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.8rem; margin-bottom: 1rem; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.15rem; }
+.stat span { color: var(--muted); font-size: 0.78rem; }
+.stat strong { font-size: 1.35rem; }
+.stat small { color: var(--muted); }
+.danger-stat strong { color: var(--danger); }
+.tabs { display: flex; gap: 0.3rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+.tab { border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.toolbar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+.inline-label { flex-direction: row; align-items: center; gap: 0.5rem; }
+.narrow { width: 5.5rem; }
+.alloc { flex-direction: row; justify-content: space-between; align-items: center; gap: 1rem; color: var(--text); }
+.alloc input { width: 8rem; }
+.badge-c-aberta { color: var(--muted); }
+.badge-c-parcial { color: #d9a441; }
+.badge-c-vencida { color: var(--danger); }
+.badge-c-paga { color: #3fb27f; }
+.badge-c-cancelada { color: var(--muted); text-decoration: line-through; }
+tr.voided td { opacity: 0.55; }
