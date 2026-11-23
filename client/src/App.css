@@ -1,85 +1,104 @@
-.center {
-  text-align: center;
-  margin-top: 4rem;
+.center { text-align: center; margin-top: 4rem; }
+.muted { color: var(--muted); }
+.spacer { flex: 1; }
+.error { color: var(--danger); margin: 0; }
+.empty { color: var(--muted); text-align: center; padding: 3rem 1rem; }
+
+.brand { color: var(--accent); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+
+label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }
+
+input, select {
+  padding: 0.55rem 0.7rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
 }
 
-.card {
-  max-width: 360px;
-  margin: 4rem auto;
+input:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  padding: 0.5rem 0.9rem;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button.danger { color: var(--danger); }
+button.link { border: none; text-decoration: underline; color: var(--muted); }
+
+.card, .panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.auth {
+  max-width: 380px;
+  margin: 5rem auto;
   padding: 2rem;
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
-  border: 1px solid #8884;
-  border-radius: 12px;
-  text-align: left;
 }
+.auth h2 { margin: 0; }
 
-.card h1,
-.card h2 {
-  margin: 0;
+.shell { display: flex; min-height: 100vh; }
+
+aside {
+  width: 220px;
+  flex-shrink: 0;
+  padding: 1.5rem 1rem;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
 }
+aside .brand { margin-bottom: 1.5rem; padding-left: 0.5rem; }
+aside nav { display: flex; flex-direction: column; gap: 0.25rem; }
+button.nav { border: none; text-align: left; color: var(--muted); }
+button.nav.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.9rem;
-}
-
-input {
-  padding: 0.55rem;
-  border: 1px solid #8886;
-  border-radius: 6px;
-  font: inherit;
-}
-
-button {
-  padding: 0.6rem 1rem;
-  border-radius: 6px;
-  border: 1px solid #8886;
-  cursor: pointer;
-  font: inherit;
-}
-
-button.link {
-  border: none;
-  background: none;
-  text-decoration: underline;
-}
-
-.error {
-  color: #c62828;
-  margin: 0;
-}
-
-.dashboard header {
+.content { flex: 1; min-width: 0; }
+.content header {
   display: flex;
   align-items: center;
   gap: 1rem;
   padding: 0.8rem 1.5rem;
-  border-bottom: 1px solid #8884;
+  border-bottom: 1px solid var(--border);
 }
+main { padding: 1.5rem; max-width: 1100px; }
 
-.dashboard header span {
-  margin-left: auto;
-}
+.page-head { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1rem; }
+.page-head h2 { margin: 0; margin-right: auto; }
+.search { width: 220px; }
 
-.dashboard main {
-  max-width: 800px;
-  margin: 2rem auto;
-  padding: 0 1rem;
-  text-align: left;
-}
+.panel { padding: 1rem; margin-bottom: 1rem; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.9rem; }
+.form-grid h3 { grid-column: 1 / -1; margin: 0; }
+.actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 0.6rem; }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
+.table-wrap { padding: 0; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+tr:last-child td { border-bottom: none; }
+.row-actions { text-align: right; display: flex; gap: 0.4rem; justify-content: flex-end; }
 
-th,
-td {
-  text-align: left;
-  padding: 0.5rem;
-  border-bottom: 1px solid #8884;
+@media (max-width: 720px) {
+  .shell { flex-direction: column; }
+  aside { width: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 0.8rem; }
+  aside .brand { margin-bottom: 0.6rem; }
+  aside nav { flex-direction: row; overflow-x: auto; }
+  main { padding: 1rem; }
+  .page-head { flex-wrap: wrap; }
+  .search { width: 100%; order: 3; }
 }

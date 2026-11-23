@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
-import { db, type User } from "./db.js";
+import { db, type AuthContext, type Role } from "./db.js";
 
 const SESSION_COOKIE = "ethos_sid";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -19,10 +19,14 @@ export function verifyPassword(password: string, stored: string): boolean {
   return crypto.timingSafeEqual(actual, expected);
 }
 
-export function createSession(res: Response, userId: number): void {
+export function createSession(res: Response, userId: number, organizationId: number): void {
   const id = crypto.randomBytes(32).toString("hex");
-  const expires = Date.now() + SESSION_TTL_MS;
-  db.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)").run(id, userId, expires);
+  db.prepare("INSERT INTO sessions (id, user_id, organization_id, expires_at) VALUES (?, ?, ?, ?)").run(
+    id,
+    userId,
+    organizationId,
+    Date.now() + SESSION_TTL_MS,
+  );
   res.cookie(SESSION_COOKIE, id, {
     httpOnly: true,
     sameSite: "lax",
@@ -49,36 +53,60 @@ function readCookie(req: Request, name: string): string | undefined {
 
 declare module "express-serve-static-core" {
   interface Request {
-    user?: User;
+    /** Contexto autenticado. A organização vem SEMPRE da sessão, nunca do cliente. */
+    auth?: AuthContext;
   }
 }
 
-export function loadUser(req: Request, _res: Response, next: NextFunction): void {
+interface SessionRow {
+  user_id: number;
+  user_name: string;
+  email: string;
+  organization_id: number;
+  organization_name: string;
+  role: Role;
+}
+
+export function loadAuth(req: Request, _res: Response, next: NextFunction): void {
   const id = readCookie(req, SESSION_COOKIE);
   if (id) {
     const row = db
       .prepare(
-        `SELECT u.id, u.name, u.email, u.role, u.created_at
-         FROM sessions s JOIN users u ON u.id = s.user_id
+        `SELECT u.id AS user_id, u.name AS user_name, u.email,
+                o.id AS organization_id, o.name AS organization_name, m.role
+         FROM sessions s
+         JOIN users u ON u.id = s.user_id
+         JOIN organizations o ON o.id = s.organization_id
+         JOIN organization_members m ON m.user_id = u.id AND m.organization_id = o.id
          WHERE s.id = ? AND s.expires_at > ?`,
       )
-      .get(id, Date.now()) as unknown as User | undefined;
-    if (row) req.user = row;
+      .get(id, Date.now()) as unknown as SessionRow | undefined;
+    if (row) {
+      req.auth = {
+        user: { id: row.user_id, name: row.user_name, email: row.email },
+        organization: { id: row.organization_id, name: row.organization_name },
+        role: row.role,
+      };
+    }
   }
   next();
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (!req.user) {
+  if (!req.auth) {
     res.status(401).json({ error: "Não autenticado" });
     return;
   }
   next();
 }
 
-export function requireRole(role: string) {
+export function requireRole(...roles: Role[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (req.user?.role !== role) {
+    if (!req.auth) {
+      res.status(401).json({ error: "Não autenticado" });
+      return;
+    }
+    if (!roles.includes(req.auth.role)) {
       res.status(403).json({ error: "Sem permissão" });
       return;
     }

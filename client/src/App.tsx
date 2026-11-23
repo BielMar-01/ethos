@@ -1,10 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { api, type User } from './api'
+import { api, type Session } from './api'
+import ResourcePage from './ResourcePage'
+import { RESOURCES } from './resources'
 import './App.css'
 
-function AuthForm({ onAuth }: { onAuth: (user: User) => void }) {
+function AuthForm({ onAuth }: { onAuth: (s: Session) => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [name, setName] = useState('')
+  const [organization, setOrganization] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -15,11 +18,11 @@ function AuthForm({ onAuth }: { onAuth: (user: User) => void }) {
     setError('')
     setBusy(true)
     try {
-      const { user } =
+      onAuth(
         mode === 'login'
           ? await api.login(email, password)
-          : await api.register(name, email, password)
-      onAuth(user)
+          : await api.register(name, email, password, organization),
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro inesperado')
     } finally {
@@ -28,14 +31,20 @@ function AuthForm({ onAuth }: { onAuth: (user: User) => void }) {
   }
 
   return (
-    <form className="card" onSubmit={submit}>
-      <h1>Ethos</h1>
+    <form className="card auth" onSubmit={submit}>
+      <div className="brand">Ethos</div>
       <h2>{mode === 'login' ? 'Entrar' : 'Criar conta'}</h2>
       {mode === 'register' && (
-        <label>
-          Nome
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
-        </label>
+        <>
+          <label>
+            Seu nome
+            <input value={name} onChange={(e) => setName(e.target.value)} required />
+          </label>
+          <label>
+            Nome da administradora
+            <input value={organization} onChange={(e) => setOrganization(e.target.value)} />
+          </label>
+        </>
       )}
       <label>
         E-mail
@@ -51,8 +60,8 @@ function AuthForm({ onAuth }: { onAuth: (user: User) => void }) {
           required
         />
       </label>
-      {error && <p className="error">{error}</p>}
-      <button type="submit" disabled={busy}>
+      {error && <p className="error" role="alert">{error}</p>}
+      <button type="submit" className="primary" disabled={busy}>
         {mode === 'login' ? 'Entrar' : 'Cadastrar'}
       </button>
       <button
@@ -69,72 +78,71 @@ function AuthForm({ onAuth }: { onAuth: (user: User) => void }) {
   )
 }
 
-function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
-  const [users, setUsers] = useState<User[]>([])
+const STAFF = ['admin', 'colaborador']
 
-  useEffect(() => {
-    if (user.role === 'admin') api.users().then((r) => setUsers(r.users)).catch(() => {})
-  }, [user])
+function Shell({ session, onLogout }: { session: Session; onLogout: () => void }) {
+  const [current, setCurrent] = useState(RESOURCES[0].key)
+  const isStaff = STAFF.includes(session.role)
+  const def = RESOURCES.find((r) => r.key === current)!
 
   return (
-    <div className="dashboard">
-      <header>
-        <strong>Ethos</strong>
-        <span>
-          {user.name} ({user.role})
-        </span>
-        <button onClick={onLogout}>Sair</button>
-      </header>
-      <main>
-        <h2>Painel</h2>
-        <p>Bem-vindo, {user.name}.</p>
-        {user.role === 'admin' && (
-          <>
-            <h3>Usuários</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>Nome</th>
-                  <th>E-mail</th>
-                  <th>Perfil</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => (
-                  <tr key={u.id}>
-                    <td>{u.name}</td>
-                    <td>{u.email}</td>
-                    <td>{u.role}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </>
-        )}
-      </main>
+    <div className="shell">
+      <aside>
+        <div className="brand">Ethos</div>
+        <nav>
+          {isStaff &&
+            RESOURCES.map((r) => (
+              <button
+                key={r.key}
+                className={r.key === current ? 'nav active' : 'nav'}
+                onClick={() => setCurrent(r.key)}
+              >
+                {r.title}
+              </button>
+            ))}
+        </nav>
+      </aside>
+      <div className="content">
+        <header>
+          <span className="muted">{session.organization.name}</span>
+          <span className="spacer" />
+          <span>
+            {session.user.name} · {session.role}
+          </span>
+          <button onClick={onLogout}>Sair</button>
+        </header>
+        <main>
+          {isStaff ? (
+            <ResourcePage key={def.key} def={def} canDelete={session.role === 'admin'} />
+          ) : (
+            <p className="empty">Seu perfil ({session.role}) ainda não tem telas disponíveis.</p>
+          )}
+        </main>
+      </div>
     </div>
   )
 }
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null)
+  const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     api
       .me()
-      .then((r) => setUser(r.user))
+      .then((r) => setSession('role' in r ? r : null))
+      .catch(() => setSession(null))
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <p className="center">Carregando…</p>
-  if (!user) return <AuthForm onAuth={setUser} />
+  if (loading) return <p className="center muted">Carregando…</p>
+  if (!session) return <AuthForm onAuth={setSession} />
   return (
-    <Dashboard
-      user={user}
+    <Shell
+      session={session}
       onLogout={async () => {
         await api.logout()
-        setUser(null)
+        setSession(null)
       }}
     />
   )

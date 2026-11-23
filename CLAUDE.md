@@ -15,11 +15,22 @@ Plataforma SaaS (futuro PWA) de administração de imóveis residenciais. Contex
 - Explique decisões arquiteturais relevantes; use exemplos práticos quando ajudar.
 
 ## Estado real do código (verificado em 2026-11-23)
-- Pasta local: `C:\Projetos\ethos` (repositório git sem commits ainda; branch `master`).
-- Stack atual: Node.js + **Express 5** + **TypeScript** (strict, NodeNext, CommonJS). Apenas `express` como dependência.
-- Arquivos: `src/server.ts`, `public/index.html`, `tsconfig.json`, `package.json`.
-- Scripts: `npm run dev` (tsx watch), `npm run build` (tsc), `npm start`. **Não há testes** (`npm test` é placeholder).
-- **Divergência a sinalizar:** a documentação cita repositório `ethos-administracao` com backend em `apps/api` e integração Supabase/PostgreSQL. Esta pasta é plana (`src/` na raiz) e **não tem** Supabase, ORM, auth, migrações nem `.env`. Confirmar com o usuário qual é o repositório de referência antes de estruturar o projeto (monorepo vs. pasta atual).
+Repositório: https://github.com/BielMar-01/ethos (branch `main`). Pasta local: `C:\Projetos\ethos`. Estrutura **plana** (não é monorepo `apps/api`).
+
+**Implementado**
+- Back-end: Node 24 + **Express 5** + **TypeScript** (strict, NodeNext, saída CommonJS; imports internos com sufixo `.js`). Banco **SQLite nativo** (`node:sqlite`, arquivo `data/ethos.db`, ignorado no git; `ETHOS_DB=:memory:` nos testes). Schema criado em `src/db.ts` (`CREATE TABLE IF NOT EXISTS`; **ainda não há sistema de migrações**).
+- Multitenancy: `organizations`, `organization_members` (papel por organização: `admin`, `colaborador`, `proprietario`, `inquilino`). A organização vem **sempre da sessão** (`req.auth`), nunca do cliente.
+- Auth (`src/auth.ts`): senha com `scrypt`, sessão em cookie `httpOnly` + `sameSite=lax` (7 dias, tabela `sessions`). O cadastro público cria uma nova organização e o usuário vira `admin`.
+- Domínio (CRUD escopado por organização via `src/crud.ts`): proprietários, imóveis, unidades (imóvel ≠ unidade locável), inquilinos; proprietários de um imóvel (N:N) em `/api/properties/:id/owners`. Leitura/escrita: `admin` e `colaborador`; exclusão: só `admin`.
+- Front-end (`client/`): React 19 + Vite + TypeScript. Login/cadastro, sidebar, `ResourcePage` genérica configurada em `client/src/resources.ts`. Tema escuro com destaque dourado usando **tokens provisórios** (`client/src/index.css`).
+- Testes: `npm test` (`node:test` + `tsx`, em `test/`) — autenticação, isolamento entre organizações, permissões, validação.
+- Scripts: `npm run dev:server`, `npm run dev:client` (proxy `/api` → :3000), `npm run build`, `npm start` (serve também `client/dist`), `npm test`.
+
+**Planejado, mas NÃO implementado** (não presumir): contratos, financeiro, vistorias, manutenção, documentos, comunicados, relatórios, dashboard, convites/RBAC granular, recuperação de senha, MFA, rate limit de login, proteção CSRF dedicada, auditoria, PWA, tela para proprietário/inquilino, migrações, `.env`.
+
+**Divergências conhecidas com a documentação**
+- `docs/` cita **Supabase + PostgreSQL** e `apps/api`; o código usa **SQLite** por simplicidade inicial. A migração para PostgreSQL (e RLS) é uma decisão pendente — preferível antes de haver dados reais. Confirmar com o usuário antes de avançar nos módulos financeiros/contratos.
+- Valores monetários são guardados em **centavos** (inteiros).
 - Nunca presuma que uma tecnologia está implementada só porque foi planejada.
 
 ## Antes de desenvolver
