@@ -3,6 +3,7 @@ import { api, type Role, type Session } from './api'
 import type { AppNotification } from './commApi'
 import AnnouncementsPage from './AnnouncementsPage'
 import ApiPage from './ApiPage'
+import AuditPage from './AuditPage'
 import Dashboard from './Dashboard'
 import FinancePage from './FinancePage'
 import Icon, { type IconName } from './Icon'
@@ -16,6 +17,7 @@ import ResourcePage from './ResourcePage'
 import TeamPage from './TeamPage'
 import TemplatesPage from './TemplatesPage'
 import ThemeToggle from './ThemeToggle'
+import { InstallButton, OfflineBanner } from './pwa'
 import { RESOURCES } from './resources'
 
 interface NavItem {
@@ -52,6 +54,7 @@ const STAFF_NAV: { label?: string; items: NavItem[] }[] = [
     items: [
       { key: 'templates', label: 'Modelos', icon: 'tag' },
       { key: 'team', label: 'Equipe', icon: 'shield', adminOnly: true },
+      { key: 'audit', label: 'Registros', icon: 'history', adminOnly: true },
       { key: 'api', label: 'API', icon: 'code' },
     ],
   },
@@ -144,6 +147,7 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
   if (current === 'notifications') content = <NotificationsPage key={`n-${orgKey}`} onOpenItem={openNotification} isStaff={staff} />
   else if (!staff) content = <PortalPage key={`p-${orgKey}-${portalTarget?.n ?? 0}`} role={session.role} initialTab={portalTarget?.tab} />
   else if (current === 'team' && isAdmin) content = <TeamPage key={`t-${orgKey}`} currentUserId={session.user.id} />
+  else if (current === 'audit' && isAdmin) content = <AuditPage key={`au-${orgKey}`} />
   else if (current === 'leases') content = <LeasesPage key={`l-${orgKey}`} isAdmin={isAdmin} />
   else if (current === 'finance') content = <FinancePage key={`f-${orgKey}`} isAdmin={isAdmin} />
   else if (current === 'maintenance') content = <MaintenancePage key={`m-${orgKey}`} isAdmin={isAdmin} currentUserId={session.user.id} />
@@ -156,6 +160,8 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
 
   return (
     <div className="shell">
+      <a className="skip-link" href="#main">Ir para o conteúdo</a>
+      <OfflineBanner />
       <aside id="sidebar" className={menuOpen ? 'sidebar open' : 'sidebar'} aria-label="Menu principal">
         <div className="brand">Ethos</div>
         <nav>
@@ -191,6 +197,7 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
             <span className="org">{session.organization.name}</span>
           )}
           <span className="spacer" />
+          <InstallButton />
           <ThemeToggle />
           <NotificationBell key={orgKey} onOpenItem={openNotification} onSeeAll={() => navigate('notifications')} />
           <div className="user-chip">
@@ -204,7 +211,7 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
             <Icon name="logout" />
           </button>
         </header>
-        <main>{content}</main>
+        <main id="main" tabIndex={-1}>{content}</main>
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, type ApiKey, type OpenApiDoc } from './api'
 import { dateTime } from './format'
+import { Alert, Loading, ask, toast } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -67,7 +68,7 @@ export default function ApiPage({ isAdmin }: { isAdmin: boolean }) {
           Baixar OpenAPI (JSON)
         </a>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
 
       <div className="panel stack">
         <h3 style={{ margin: 0 }}>Como consumir</h3>
@@ -86,7 +87,7 @@ export default function ApiPage({ isAdmin }: { isAdmin: boolean }) {
       {isAdmin && <KeysPanel />}
 
       {!doc ? (
-        <p className="muted">Carregando documentação…</p>
+        <Loading label="Carregando documentação…" />
       ) : (
         tags.map((tag) => (
           <div key={tag}>
@@ -164,16 +165,18 @@ function KeysPanel() {
       setCreated(r.token)
       setName('')
       await load()
+      toast.success('Chave criada. Copie agora: ela não será mostrada de novo.')
     } catch (err) {
       setError(message(err))
     }
   }
 
   async function revoke(k: ApiKey) {
-    if (!window.confirm(`Revogar a chave "${k.name}"? Integrações que a usam deixam de funcionar.`)) return
+    if (!(await ask(`Revogar a chave "${k.name}"? Integrações que a usam deixam de funcionar.`))) return
     try {
       await api.revokeApiKey(k.id)
       await load()
+      toast.success('Chave revogada.')
     } catch (err) {
       setError(message(err))
     }
@@ -182,7 +185,7 @@ function KeysPanel() {
   return (
     <div className="panel stack">
       <h3 style={{ margin: 0 }}>Chaves de API</h3>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       {created && (
         <div className="key-once">
           <strong>Copie agora: esta chave não será exibida novamente.</strong>

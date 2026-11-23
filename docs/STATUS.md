@@ -20,6 +20,9 @@
 - ✅ **Manutenção**: chamados com prioridade, responsável, fluxo de status, orçamentos com aprovação do admin, linha do tempo (notas internas × visíveis ao cliente), fotos.
 - ✅ **Vistorias**: checklist por ambiente, fotos, conclusão só com tudo avaliado, laudo, registro de ciência, comparação entrada × saída, imutável depois de concluída.
 - ✅ **Comunicados e notificações**: comunicados por público (todos, inquilinos, proprietários, imóvel); notificações internas por eventos; **lembretes automáticos** (vencimento próximo, atraso, fim de contrato); preferências por categoria.
+- ✅ **Registros de atividade (auditoria)**: toda escrita e toda negação de permissão, login e login falho; só o admin vê; filtros, paginação e CSV; imutável.
+- 🟡 **PWA**: instalável, abre offline com tela de aviso (dados nunca em cache); ícones provisórios.
+- 🟡 **Avisos e confirmações** padronizados (toasts, erros inline, diálogo de confirmação, esqueletos de carregamento).
 - ✅ **Painel** da equipe: ocupação, contratos, financeiro do mês, chamados, vistorias e "pede atenção agora".
 - ✅ **Área do cliente** (inquilino e proprietário): cobranças, recibos, contrato, documentos, manutenção, vistorias (com ciência), comunicados, repasses — sempre pelo vínculo com o cadastro.
 
@@ -37,7 +40,7 @@
 2. ⬜ **Testes de interface** (Playwright) dos fluxos críticos e teste de acessibilidade.
 3. ⬜ **Testar o e-mail de recuperação de senha e o link do admin** contra o Supabase real; cadastrar `APP_URL` nas *Redirect URLs*; configurar **SMTP próprio** (o padrão do Supabase tem limite baixo).
 4. ⬜ **Trocar os segredos expostos na conversa** (senha do banco, `SUPABASE_SECRET_KEY`, senha temporária do admin).
-5. ⬜ **Deploy**: hospedagem, domínio, HTTPS, variáveis de produção, CI (testes a cada push), backup/restauração do banco. Em hospedagem *serverless*, os lembretes precisam de agendador externo (`POST /api/reminders/run`).
+5. ⬜ **Deploy (Vercel em preparo)**: o Express precisa de adaptação serverless (`api/index.ts` + `vercel.json`), lembretes por Cron externo, `APP_URL`/Redirect URLs do Supabase; hospedagem, domínio, HTTPS, variáveis de produção, CI (testes a cada push), backup/restauração do banco. Em hospedagem *serverless*, os lembretes precisam de agendador externo (`POST /api/reminders/run`).
 6. ⬜ **Identidade visual oficial** (logotipo e paleta): hoje são tokens provisórios.
 7. ⬜ **Segurança de produção**: cabeçalhos (CSP/HSTS), CSRF dedicado, limite de requisições compartilhado entre instâncias, logs estruturados, revisão de segurança externa.
 

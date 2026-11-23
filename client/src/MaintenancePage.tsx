@@ -4,6 +4,7 @@ import { work, type MaintDetail, type MaintItem, type MaintStatus } from './work
 import { CATEGORY, MAINT_STATUS, PRIORITY } from './labels'
 import { brl, dateTime, parseReais } from './format'
 import PhotoStrip from './PhotoStrip'
+import { Alert, Loading, toast } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -46,9 +47,9 @@ function List({ onOpen, onNew }: { onOpen: (id: number) => void; onNew: () => vo
         </select>
         <button className="primary" onClick={onNew}>Nova solicitação</button>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       {loading ? (
-        <p className="muted">Carregando…</p>
+        <Loading label="Carregando…" />
       ) : items.length === 0 ? (
         <p className="empty">Nenhum chamado por aqui.</p>
       ) : (
@@ -137,7 +138,7 @@ function NewRequest({ onDone, onCancel }: { onDone: (id: number) => void; onCanc
           <textarea rows={4} value={form.description} onChange={set('description')} maxLength={4000} required />
         </label>
         <p className="muted small span-all">Você poderá anexar fotos logo após criar a solicitação.</p>
-        {error && <p className="error span-all" role="alert">{error}</p>}
+        {error && <Alert className="span-all">{error}</Alert>}
         <div className="actions">
           <button type="button" onClick={onCancel}>Cancelar</button>
           <button type="submit" className="primary">Criar solicitação</button>
@@ -192,12 +193,13 @@ function Detail({ id, isAdmin, currentUserId, onBack }: { id: number; isAdmin: b
     try {
       await action()
       await load()
+      toast.success('Alteração salva.')
     } catch (e) {
       setError(message(e))
     }
   }
 
-  if (!d) return error ? <p className="error" role="alert">{error}</p> : <p className="muted">Carregando…</p>
+  if (!d) return error ? <Alert>{error}</Alert> : <Loading label="Carregando…" />
   const { item, quotes, updates, photos } = d
   const closed = item.status === 'concluida' || item.status === 'cancelada'
 
@@ -240,7 +242,7 @@ function Detail({ id, isAdmin, currentUserId, onBack }: { id: number; isAdmin: b
         <span className={`badge badge-m-${item.status}`}>{MAINT_STATUS[item.status]}</span>
         <span className={`badge badge-p-${item.priority}`}>{PRIORITY[item.priority]}</span>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
 
       <div className="panel">
         <dl className="facts">

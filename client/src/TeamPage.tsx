@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, ROLE_LABELS, type Invitation, type Item, type Member, type Role } from './api'
+import { Alert, Toast, Loading, ask } from './feedback'
 
 const ROLES = Object.keys(ROLE_LABELS) as Role[]
 
@@ -77,8 +78,8 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
       await load()
     })
 
-  const remove = (m: Member) => {
-    if (!window.confirm(`Remover ${m.name} da organização? Ele perde o acesso imediatamente.`)) return
+  const remove = async (m: Member) => {
+    if (!(await ask(`Remover ${m.name} da organização? Ele perde o acesso imediatamente.`))) return
     return run(async () => {
       await api.removeMember(m.id)
       await load()
@@ -106,8 +107,8 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
         <h2>Equipe</h2>
       </div>
 
-      {error && <p className="error" role="alert">{error}</p>}
-      {notice && <p className="notice" role="status">{notice}</p>}
+      {error && <Alert>{error}</Alert>}
+      {notice && <Toast>{notice}</Toast>}
 
       {link && (
         <div className="panel link-box">
@@ -173,7 +174,7 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
       </form>
 
       {loading ? (
-        <p className="muted">Carregando…</p>
+        <Loading label="Carregando…" />
       ) : (
         <>
           <h3>Membros</h3>

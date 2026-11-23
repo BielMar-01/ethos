@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Sem conexão — Ethos</title>
+    <style>
+      :root { color-scheme: dark light; --bg: #0d0d0f; --text: #ececef; --muted: #9c9ca6; --accent: #c9a24a; --accent-text: #17130a; }
+      @media (prefers-color-scheme: light) { :root { --bg: #f6f5f1; --text: #1a1a1d; --muted: #62626b; --accent: #8c6a17; --accent-text: #fff; } }
+      body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 1.5rem; text-align: center; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+      main { max-width: 26rem; }
+      .mark { width: 64px; height: 64px; margin: 0 auto 1.25rem; }
+      h1 { margin: 0 0 0.5rem; font-size: 1.5rem; }
+      p { margin: 0 0 1.5rem; color: var(--muted); line-height: 1.55; }
+      button { min-height: 44px; padding: 0 1.4rem; font: inherit; font-weight: 600; color: var(--accent-text); background: var(--accent); border: 0; border-radius: 10px; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#0d0d0f"/><path fill="#c9a24a" d="M19 14h27v7H27v7h15v7H27v8h19v7H19z"/></svg>
+      <h1>Você está sem conexão</h1>
+      <p>O Ethos precisa de internet para mostrar seus dados com segurança. Nada foi perdido: assim que a conexão voltar, é só tentar de novo.</p>
+      <button onclick="location.reload()">Tentar novamente</button>
+    </main>
+  </body>
+</html>

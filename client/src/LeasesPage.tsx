@@ -10,6 +10,7 @@ import {
   type Template,
 } from './api'
 import { brl, date, dateTime, parseReais, reaisInput } from './format'
+import { Alert, Toast, Loading, ask } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -84,9 +85,9 @@ function LeaseList({ onOpen, onNew }: { onOpen: (id: number) => void; onNew: () 
           Novo contrato
         </button>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       {loading ? (
-        <p className="muted">Carregando…</p>
+        <Loading label="Carregando…" />
       ) : visible.length === 0 ? (
         <p className="empty">{items.length === 0 ? 'Nenhum contrato cadastrado ainda.' : 'Nenhum contrato nesta situação.'}</p>
       ) : (
@@ -208,7 +209,7 @@ function LeaseForm({ id, onDone, onCancel }: { id?: number; onDone: (id: number)
   const toggleTenant = (tid: number) =>
     setTenantIds((cur) => (cur.includes(tid) ? cur.filter((x) => x !== tid) : [...cur, tid]))
 
-  if (loading) return <p className="muted">Carregando…</p>
+  if (loading) return <Loading label="Carregando…" />
 
   return (
     <section>
@@ -272,7 +273,7 @@ function LeaseForm({ id, onDone, onCancel }: { id?: number; onDone: (id: number)
             Observações
             <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} />
           </label>
-          {error && <p className="error span-all" role="alert">{error}</p>}
+          {error && <Alert className="span-all">{error}</Alert>}
           <div className="actions">
             <button type="button" onClick={onCancel}>
               Cancelar
@@ -283,7 +284,7 @@ function LeaseForm({ id, onDone, onCancel }: { id?: number; onDone: (id: number)
           </div>
         </form>
       )}
-      {error && (units.length === 0 || tenants.length === 0) && <p className="error" role="alert">{error}</p>}
+      {error && (units.length === 0 || tenants.length === 0) && <Alert>{error}</Alert>}
     </section>
   )
 }
@@ -324,16 +325,16 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
     }
   }
 
-  const changeStatus = (status: LeaseStatus, confirmText?: string) => {
-    if (confirmText && !window.confirm(confirmText)) return
+  const changeStatus = async (status: LeaseStatus, confirmText?: string) => {
+    if (confirmText && !(await ask(confirmText))) return
     return run(async () => {
       await api.setLeaseStatus(id, status)
       await load()
     })
   }
 
-  const remove = () => {
-    if (!window.confirm('Excluir este rascunho? Esta ação não pode ser desfeita.')) return
+  const remove = async () => {
+    if (!(await ask('Excluir este rascunho? Esta ação não pode ser desfeita.'))) return
     return run(async () => {
       await api.removeLease(id)
       onBack()
@@ -361,7 +362,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
       setPreview({ content: d.content, title: `${d.template_name} (v${d.template_version}) — emitido em ${dateTime(d.created_at)}`, saved: true })
     })
 
-  if (!detail) return error ? <p className="error" role="alert">{error}</p> : <p className="muted">Carregando…</p>
+  if (!detail) return error ? <Alert>{error}</Alert> : <Loading label="Carregando…" />
   const { lease, tenants, unit } = detail
 
   return (
@@ -373,8 +374,8 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
         </h2>
         <Badge status={lease.status} />
       </div>
-      {error && <p className="error no-print" role="alert">{error}</p>}
-      {notice && <p className="notice no-print" role="status">{notice}</p>}
+      {error && <Alert className="no-print">{error}</Alert>}
+      {notice && <Toast>{notice}</Toast>}
 
       <div className="panel no-print">
         <dl className="facts">

@@ -250,14 +250,45 @@ export const ROLE_LABELS: Record<Role, string> = {
   inquilino: 'Inquilino',
 }
 
+export class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
+/** Texto padrão quando o servidor não explica o erro (ou quando é um erro técnico que o usuário não deve ver). */
+const BY_STATUS: Record<number, string> = {
+  401: 'Sua sessão expirou. Entre novamente para continuar.',
+  403: 'Você não tem permissão para fazer isso.',
+  404: 'Não encontramos o que você procurou. Pode ter sido removido.',
+  408: 'A conexão demorou demais. Tente novamente.',
+  413: 'O arquivo é grande demais.',
+  429: 'Muitas tentativas em pouco tempo. Aguarde um momento e tente de novo.',
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  })
+  let res: Response
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
+    })
+  } catch {
+    throw new ApiError('Sem conexão com o servidor. Verifique sua internet e tente novamente.', 0)
+  }
   if (res.status === 204) return undefined as T
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error ?? 'Erro inesperado')
+  if (!res.ok) {
+    // Sessão perdida fora das telas de login: avisa o app para voltar ao login.
+    if (res.status === 401 && !path.startsWith('/api/auth/')) window.dispatchEvent(new Event('ethos:unauthorized'))
+    const own = typeof data.error === 'string' && res.status < 500 ? data.error : ''
+    throw new ApiError(
+      own || BY_STATUS[res.status] || (res.status >= 500 ? 'Algo deu errado do nosso lado. Tente novamente em instantes.' : 'Não foi possível concluir. Tente novamente.'),
+      res.status,
+    )
+  }
   return data as T
 }
 

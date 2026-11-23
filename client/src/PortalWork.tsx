@@ -6,6 +6,7 @@ import { CATEGORY, INSP_TYPE, MAINT_STATUS, PRIORITY, SIGN_NOTE } from './labels
 import { brl, date, dateTime } from './format'
 import PhotoStrip from './PhotoStrip'
 import { ReadOnlyChecklist, ReportPaper, Signatures } from './InspectionView'
+import { Alert, Loading, toast } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -25,10 +26,10 @@ export function ClientAnnouncements() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <p className="muted">Carregando…</p>
+  if (loading) return <Loading label="Carregando…" />
   return (
     <>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       {items.length === 0 ? (
         <p className="empty">Nenhum comunicado por enquanto.</p>
       ) : (
@@ -72,7 +73,7 @@ export function TenantMaintenance({ leases }: { leases: PortalLease[] }) {
 
   return (
     <>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       <div className="toolbar">
         <span className="spacer" />
         <button className="primary" disabled={active.length === 0} onClick={() => setCreating(true)}>Nova solicitação</button>
@@ -143,7 +144,7 @@ function NewTenantRequest({ leases, onDone, onCancel }: { leases: PortalLease[];
         <textarea rows={4} value={form.description} onChange={set('description')} maxLength={4000} required />
       </label>
       <p className="muted small span-all">Depois de enviar, você poderá anexar fotos e acompanhar cada etapa.</p>
-      {error && <p className="error span-all" role="alert">{error}</p>}
+      {error && <Alert className="span-all">{error}</Alert>}
       <div className="actions">
         <button type="button" onClick={onCancel}>Cancelar</button>
         <button type="submit" className="primary">Enviar solicitação</button>
@@ -174,12 +175,13 @@ function TenantRequest({ id, onBack }: { id: number; onBack: () => void }) {
     try {
       await action()
       await load()
+      toast.success('Alteração salva.')
     } catch (e) {
       setError(message(e))
     }
   }
 
-  if (!d) return error ? <p className="error" role="alert">{error}</p> : <p className="muted">Carregando…</p>
+  if (!d) return error ? <Alert>{error}</Alert> : <Loading label="Carregando…" />
   const { item, updates, photos } = d
   const closed = item.status === 'concluida' || item.status === 'cancelada'
 
@@ -190,7 +192,7 @@ function TenantRequest({ id, onBack }: { id: number; onBack: () => void }) {
         <h3 style={{ margin: 0 }}>{item.title}</h3>
         <span className={`badge badge-m-${item.status}`}>{MAINT_STATUS[item.status]}</span>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       <div className="panel stack">
         <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{item.description}</p>
         <div className="muted small">{CATEGORY[item.category]} · urgência {PRIORITY[item.priority].toLowerCase()} · aberta em {dateTime(item.created_at)}</div>
@@ -250,7 +252,7 @@ export function OwnerMaintenance() {
 
   return (
     <>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       {items.length === 0 ? (
         <p className="empty">Nenhum chamado de manutenção nos seus imóveis.</p>
       ) : (
@@ -290,7 +292,7 @@ export function ClientInspections({ who }: { who: 'tenant' | 'owner' }) {
   if (openId !== null) return <ClientInspection who={who} id={openId} onBack={() => setOpenId(null)} />
   return (
     <>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       {items.length === 0 ? (
         <p className="empty">Nenhuma vistoria concluída por enquanto.</p>
       ) : (
@@ -344,7 +346,7 @@ function ClientInspection({ who, id, onBack }: { who: 'tenant' | 'owner'; id: nu
     }
   }
 
-  if (!d) return error ? <p className="error" role="alert">{error}</p> : <p className="muted">Carregando…</p>
+  if (!d) return error ? <Alert>{error}</Alert> : <Loading label="Carregando…" />
   const alreadySigned = d.signatures.some((s) => s.role === role)
 
   return (
@@ -354,7 +356,7 @@ function ClientInspection({ who, id, onBack }: { who: 'tenant' | 'owner'; id: nu
         <h3 style={{ margin: 0 }}>Vistoria de {INSP_TYPE[d.inspection.type].toLowerCase()} — {d.inspection.property_name} · {d.inspection.unit_identifier}</h3>
         <button onClick={() => setReport(true)}>Ver laudo</button>
       </div>
-      {error && <p className="error no-print" role="alert">{error}</p>}
+      {error && <Alert className="no-print">{error}</Alert>}
       {report && <ReportPaper report={d.report} onClose={() => setReport(false)} />}
       <div className="panel no-print">
         <p className="muted small">Realizada em {date(d.inspection.performed_at ?? '')}.</p>

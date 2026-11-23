@@ -5,6 +5,7 @@ import { CONDITION, CONDITIONS, INSP_STATUS, INSP_TYPE, ROLE_NAME, SIGN_NOTE, gr
 import { date } from './format'
 import PhotoStrip from './PhotoStrip'
 import { ReadOnlyChecklist, ReportPaper, Signatures } from './InspectionView'
+import { Alert, Loading, ask, toast } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 const today = () => new Date().toLocaleDateString('sv-SE')
@@ -50,9 +51,9 @@ function List({ onOpen, onNew }: { onOpen: (id: number) => void; onNew: () => vo
         </select>
         <button className="primary" onClick={onNew}>Nova vistoria</button>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       {loading ? (
-        <p className="muted">Carregando…</p>
+        <Loading label="Carregando…" />
       ) : items.length === 0 ? (
         <p className="empty">Nenhuma vistoria encontrada.</p>
       ) : (
@@ -130,7 +131,7 @@ function NewInspection({ onDone, onCancel }: { onDone: (id: number) => void; onC
         <p className="muted small span-all">
           O checklist padrão (sala, cozinha, banheiro, quarto, área de serviço e geral) é criado automaticamente; você pode ajustar os itens depois.
         </p>
-        {error && <p className="error span-all" role="alert">{error}</p>}
+        {error && <Alert className="span-all">{error}</Alert>}
         <div className="actions">
           <button type="button" onClick={onCancel}>Cancelar</button>
           <button type="submit" className="primary">Criar vistoria</button>
@@ -179,12 +180,13 @@ function InspectionDetail({ id, onBack }: { id: number; onBack: () => void }) {
     try {
       await action()
       await load()
+      toast.success('Alteração salva.')
     } catch (e) {
       setError(message(e))
     }
   }
 
-  if (!d) return error ? <p className="error" role="alert">{error}</p> : <p className="muted">Carregando…</p>
+  if (!d) return error ? <Alert>{error}</Alert> : <Loading label="Carregando…" />
   const { inspection: insp, items, signatures } = d
   const open = insp.status === 'agendada' || insp.status === 'em_andamento'
   const done = items.filter((i) => i.condition).length
@@ -233,7 +235,7 @@ function InspectionDetail({ id, onBack }: { id: number; onBack: () => void }) {
         <h2>Vistoria de {INSP_TYPE[insp.type].toLowerCase()} — {insp.property_name} · {insp.unit_identifier}</h2>
         <span className={`badge badge-i-${insp.status}`}>{INSP_STATUS[insp.status]}</span>
       </div>
-      {error && <p className="error no-print" role="alert">{error}</p>}
+      {error && <Alert className="no-print">{error}</Alert>}
 
       {report !== null && <ReportPaper report={report} onClose={() => setReport(null)} />}
 
@@ -250,7 +252,7 @@ function InspectionDetail({ id, onBack }: { id: number; onBack: () => void }) {
         <div className="actions left">
           {insp.status === 'agendada' && <button className="primary" onClick={() => run(() => work.setInspectionStatus(id, 'em_andamento'))}>Iniciar vistoria</button>}
           {insp.status === 'em_andamento' && <button className="primary" onClick={conclude}>Concluir vistoria</button>}
-          {open && <button className="danger" onClick={() => window.confirm('Cancelar esta vistoria?') && run(() => work.setInspectionStatus(id, 'cancelada'))}>Cancelar</button>}
+          {open && <button className="danger" onClick={async () => (await ask('Cancelar esta vistoria?')) && run(() => work.setInspectionStatus(id, 'cancelada'))}>Cancelar</button>}
           {isDone && <button onClick={showReport}>Ver laudo</button>}
         </div>
         {open && <p className="muted small">Depois de concluída, a vistoria não pode mais ser alterada.</p>}

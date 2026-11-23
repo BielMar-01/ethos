@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, type Item } from './api'
 import type { FieldDef, ResourceDef } from './resources'
+import { Alert, Loading, ask, toast } from './feedback'
 
 type FormState = Record<string, string>
 
@@ -60,16 +61,18 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
       else if (editing) await api.update(def.key, editing.id, body)
       setEditing(null)
       await load()
+      toast.success(`${def.singular[0].toUpperCase()}${def.singular.slice(1)} salvo com sucesso.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro inesperado')
     }
   }
 
   async function remove(item: Item) {
-    if (!window.confirm(`Excluir este ${def.singular}? Esta ação não pode ser desfeita.`)) return
+    if (!(await ask(`Excluir este ${def.singular}? Esta ação não pode ser desfeita.`))) return
     try {
       await api.remove(def.key, item.id)
       await load()
+      toast.success(`${def.singular[0].toUpperCase()}${def.singular.slice(1)} excluído.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro inesperado')
     }
@@ -105,7 +108,7 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
         </button>
       </div>
 
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
 
       {editing && (
         <form className="panel form-grid" onSubmit={save}>
@@ -162,7 +165,7 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
       )}
 
       {loading ? (
-        <p className="muted">Carregando…</p>
+        <Loading label="Carregando…" />
       ) : visible.length === 0 ? (
         <p className="empty">
           {items.length === 0 ? `Nenhum ${def.singular} cadastrado ainda.` : 'Nada encontrado para a busca.'}

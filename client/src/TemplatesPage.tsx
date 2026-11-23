@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, type Template } from './api'
 import { dateTime } from './format'
+import { Alert, Loading, ask, toast } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -83,10 +84,11 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
   }
 
   async function remove(t: Template) {
-    if (!window.confirm(`Excluir o modelo "${t.name}"? Documentos já emitidos não são afetados.`)) return
+    if (!(await ask(`Excluir o modelo "${t.name}"? Documentos já emitidos não são afetados.`))) return
     try {
       await api.removeTemplate(t.id)
       await load()
+      toast.success('Modelo excluído.')
     } catch (err) {
       setError(message(err))
     }
@@ -100,7 +102,7 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
           Novo modelo
         </button>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
 
       {editing && (
         <form className="panel stack" onSubmit={save}>
@@ -153,7 +155,7 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
       )}
 
       {loading ? (
-        <p className="muted">Carregando…</p>
+        <Loading label="Carregando…" />
       ) : items.length === 0 ? (
         <p className="empty">Nenhum modelo cadastrado ainda.</p>
       ) : (

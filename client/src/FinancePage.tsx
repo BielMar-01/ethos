@@ -9,6 +9,7 @@ import {
   type Transfer,
 } from './api'
 import { brl, date, parseReais, reaisInput } from './format'
+import { Alert, Toast, Loading, ask } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 const today = () => new Date().toLocaleDateString('sv-SE') // AAAA-MM-DD no fuso local
@@ -107,8 +108,8 @@ export default function FinancePage({ isAdmin }: { isAdmin: boolean }) {
         </div>
       )}
 
-      {error && <p className="error no-print" role="alert">{error}</p>}
-      {notice && <p className="notice no-print" role="status">{notice}</p>}
+      {error && <Alert className="no-print">{error}</Alert>}
+      {notice && <Toast>{notice}</Toast>}
 
       {receipt && (
         <div className="panel print-area">
@@ -177,7 +178,7 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
   }
 
   async function cancel(c: Charge) {
-    if (!window.confirm(`Cancelar a cobrança "${c.description}" de ${c.tenant_names}?`)) return
+    if (!(await ask(`Cancelar a cobrança "${c.description}" de ${c.tenant_names}?`))) return
     try {
       await api.cancelCharge(c.id)
       onChange()
@@ -211,7 +212,7 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
       )}
 
       {loading ? (
-        <p className="muted">Carregando…</p>
+        <Loading label="Carregando…" />
       ) : items.length === 0 ? (
         <p className="empty">Nenhuma cobrança neste mês. Use “Gerar aluguéis do mês” para criá-las a partir dos contratos vigentes.</p>
       ) : (
@@ -289,7 +290,7 @@ function NewCharge({ onDone, onCancel, onError }: { onDone: () => void; onCancel
       <label>Descrição<input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={300} required /></label>
       <label>Vencimento<input type="date" value={due} onChange={(e) => setDue(e.target.value)} required /></label>
       <label>Valor (R$)<input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="150,00" required /></label>
-      {formError && <p className="error span-all" role="alert">{formError}</p>}
+      {formError && <Alert className="span-all">{formError}</Alert>}
       <div className="actions">
         <button type="button" onClick={onCancel}>Cancelar</button>
         <button type="submit" className="primary">Criar cobrança</button>
@@ -371,7 +372,7 @@ function ReceivePayment({ charge, onDone, onCancel, onError }: { charge: Charge;
         <label>Referência (opcional)<input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={200} /></label>
       </div>
       <strong>Total recebido: {brl(total)}</strong>
-      {formError && <p className="error" role="alert">{formError}</p>}
+      {formError && <Alert>{formError}</Alert>}
       <div className="actions">
         <button type="button" onClick={onCancel}>Cancelar</button>
         <button type="submit" className="primary" disabled={total <= 0}>Registrar e emitir recibo</button>
@@ -402,7 +403,7 @@ function PaymentsTab({ month, version, isAdmin, onChange, onError, onOk, onRecei
     }
   }
 
-  if (loading) return <p className="muted">Carregando…</p>
+  if (loading) return <Loading label="Carregando…" />
   if (items.length === 0) return <p className="empty">Nenhum pagamento recebido neste mês.</p>
   return (
     <div className="panel table-wrap">
@@ -456,7 +457,7 @@ function TransfersTab({ month, version, isAdmin, onChange, onError, onOk }: TabP
   }
 
   async function pay(t: Transfer) {
-    if (!window.confirm(`Marcar como pago o repasse de ${brl(t.net_cents)} para ${t.owner_name}?`)) return
+    if (!(await ask(`Marcar como pago o repasse de ${brl(t.net_cents)} para ${t.owner_name}?`))) return
     try {
       await api.payTransfer(t.id)
       onChange()
@@ -495,7 +496,7 @@ function TransfersTab({ month, version, isAdmin, onChange, onError, onOk }: TabP
         Considera só aluguéis efetivamente recebidos no mês (baixas de pagamentos não estornados), divididos em partes iguais entre os proprietários do imóvel.
       </p>
       {loading ? (
-        <p className="muted">Carregando…</p>
+        <Loading label="Carregando…" />
       ) : items.length === 0 ? (
         <p className="empty">Nenhum repasse calculado para este mês.</p>
       ) : (

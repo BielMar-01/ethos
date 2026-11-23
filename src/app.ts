@@ -19,6 +19,7 @@ import { dashboardRouter } from "./dashboard.js";
 import { apiKeysRouter } from "./apikeys.js";
 import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
+import { auditMiddleware, auditRouter, recordAudit, requestInfo } from "./audit.js";
 
 const MIN_PASSWORD = 8;
 const MAX_PASSWORD = 200;
@@ -36,8 +37,11 @@ const personFields: Field[] = [
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
+  // Atrás de proxy (Vercel etc.) o IP real vem de X-Forwarded-For; sem isso, limites e auditoria veem só o IP do proxy.
+  if (process.env.VERCEL || process.env.TRUST_PROXY) app.set("trust proxy", 1);
   app.use(express.json({ limit: "100kb" }));
   app.use(loadAuth);
+  app.use(auditMiddleware);
 
   // Limites contra força bruta e abuso de e-mails (em memória, por instância).
   const loginLimiter = new RateLimiter(10, 15 * 60 * 1000);
@@ -134,6 +138,19 @@ export function createApp() {
     );
     const verified = user ? await getAuthProvider().verifyCredentials(cleanEmail, password) : null;
     if (!user || !verified || verified.id !== user.auth_id) {
+      if (user) {
+        // Registra a tentativa falha em cada organização do usuário (o admin enxerga só a sua).
+        const orgs = await db.query<{ organization_id: number; role: string }>(
+          "SELECT organization_id, role FROM organization_members WHERE user_id = $1",
+          [user.id],
+        );
+        for (const o of orgs) {
+          await recordAudit({
+            organizationId: o.organization_id, userId: user.id, userName: user.name, userEmail: user.email, role: o.role,
+            kind: "auth", entity: "auth", summary: "Tentativa de login com senha incorreta", status: 401, ...requestInfo(req),
+          });
+        }
+      }
       res.status(401).json({ error: "E-mail ou senha incorretos" });
       return;
     }
@@ -218,6 +235,17 @@ export function createApp() {
     }
     // Quem trocou a senha por recuperação provavelmente perdeu o controle: derruba todas as sessões.
     await db.query("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE auth_id = $1)", [owner.id]);
+    const who = await db.query<{ id: number; name: string; email: string; organization_id: number; role: string }>(
+      `SELECT u.id, u.name, u.email, m.organization_id, m.role FROM users u
+       JOIN organization_members m ON m.user_id = u.id WHERE u.auth_id = $1`,
+      [owner.id],
+    );
+    for (const w of who) {
+      await recordAudit({
+        organizationId: w.organization_id, userId: w.id, userName: w.name, userEmail: w.email, role: w.role,
+        kind: "auth", entity: "auth", summary: "Redefiniu a própria senha pelo link de recuperação", status: 204, ...requestInfo(req),
+      });
+    }
     res.status(204).end();
   });
 
@@ -270,6 +298,7 @@ export function createApp() {
   app.use("/api", clientAnnouncementsRouter);
   app.use("/api", remindersRouter);
   app.use("/api", dashboardRouter);
+  app.use("/api", auditRouter);
   app.use("/api", apiKeysRouter);
   app.get("/api/openapi.json", (req, res) => {
     res.json(buildOpenApi(`${req.protocol}://${req.get("host")}`));
@@ -370,7 +399,20 @@ export function createApp() {
   // Em produção serve o front-end compilado (client/dist).
   const clientDist = path.join(process.cwd(), "client", "dist");
   if (fs.existsSync(clientDist)) {
-    app.use(express.static(clientDist));
+    app.use(
+      express.static(clientDist, {
+        setHeaders(res, file) {
+          const name = path.basename(file);
+          // O service worker e o manifesto nunca podem ficar presos em cache; os arquivos com hash no nome, sim.
+          if (name === "sw.js" || name === "manifest.webmanifest" || name === "index.html" || name === "offline.html") {
+            res.setHeader("Cache-Control", "no-cache");
+          } else if (file.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          }
+          if (name === "sw.js") res.setHeader("Service-Worker-Allowed", "/");
+        },
+      }),
+    );
     app.get(/.*/, (_req, res) => {
       res.sendFile(path.join(clientDist, "index.html"));
     });

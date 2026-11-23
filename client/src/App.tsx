@@ -7,6 +7,8 @@ import Shell from './Shell'
 import { go, routeFromHash, type PublicRoute } from './routes'
 import './App.css'
 import './layout.css'
+import './ux.css'
+import { Alert, Loading, toast } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -114,7 +116,7 @@ function AuthForm({ onAuth, notice, initialMode = 'login' }: { onAuth: (s: Sessi
           />
         </label>
       )}
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       {info && <p className="notice" role="status">{info}</p>}
       <button type="submit" className="primary" disabled={busy}>
         {mode === 'login' ? 'Entrar' : mode === 'register' ? 'Cadastrar' : 'Enviar link de recuperação'}
@@ -168,7 +170,7 @@ function ResetPassword({ accessToken, onDone }: { accessToken: string; onDone: (
         Confirmar senha
         <PasswordInput minLength={8} autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
       </label>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       <button type="submit" className="primary" disabled={busy}>
         Salvar nova senha
       </button>
@@ -211,7 +213,7 @@ function AcceptInvite({ token, onAuth, onCancel }: { token: string; onAuth: (s: 
       </Page>
     )
   }
-  if (!info) return <p className="center muted">Carregando convite…</p>
+  if (!info) return <Loading label="Carregando convite…" />
 
   return (
     <Page title={`Convite para ${info.organizationName}`} onSubmit={submit}>
@@ -237,7 +239,7 @@ function AcceptInvite({ token, onAuth, onCancel }: { token: string; onAuth: (s: 
           required
         />
       </label>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       <button type="submit" className="primary" disabled={busy}>
         Aceitar convite
       </button>
@@ -266,12 +268,22 @@ export default function App() {
       .finally(() => setLoading(false))
   }, [])
 
+  // Qualquer chamada que volte 401 (sessão expirada em outra aba, por exemplo) leva ao login com um aviso.
+  useEffect(() => {
+    const onExpired = () => {
+      toast.info('Sua sessão expirou. Entre novamente.')
+      setSession(null)
+    }
+    window.addEventListener('ethos:unauthorized', onExpired)
+    return () => window.removeEventListener('ethos:unauthorized', onExpired)
+  }, [])
+
   function authenticated(s: Session) {
     window.history.replaceState(null, '', window.location.pathname)
     setSession(s)
   }
 
-  if (loading) return <p className="center muted">Carregando…</p>
+  if (loading) return <Loading label="Carregando…" />
 
   if (entry.kind === 'reset') {
     return (
@@ -321,8 +333,9 @@ export default function App() {
       session={session}
       onSession={setSession}
       onLogout={async () => {
-        await api.logout()
+        await api.logout().catch(() => {})
         setSession(null)
+        toast.success('Você saiu do sistema.')
         go('home')
       }}
     />

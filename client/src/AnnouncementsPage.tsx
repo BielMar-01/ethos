@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, type Item } from './api'
 import { comm, type Announcement, type Audience } from './commApi'
 import { dateTime } from './format'
+import { Alert, Toast, Loading, ask } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -73,8 +74,8 @@ export default function AnnouncementsPage() {
     })
   }
 
-  function publish(a: Announcement) {
-    if (!window.confirm(`Publicar "${a.title}" para ${AUDIENCE[a.audience].toLowerCase()}? Depois de publicado, o texto não pode ser alterado.`)) return
+  async function publish(a: Announcement) {
+    if (!(await ask(`Publicar "${a.title}" para ${AUDIENCE[a.audience].toLowerCase()}? Depois de publicado, o texto não pode ser alterado.`))) return
     return run(async () => {
       const r = await comm.publishAnnouncement(a.id)
       setNotice(`Publicado. ${r.recipients} pessoa(s) no público; ${r.notified} notificada(s) (quem desligou os comunicados não recebe o aviso, mas vê na área do cliente).`)
@@ -87,8 +88,8 @@ export default function AnnouncementsPage() {
         <h2>Comunicados</h2>
         <button className="primary" onClick={() => open('new')}>Novo comunicado</button>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
-      {notice && <p className="notice" role="status">{notice}</p>}
+      {error && <Alert>{error}</Alert>}
+      {notice && <Toast>{notice}</Toast>}
 
       {editing && (
         <form className="panel form-grid" onSubmit={save}>
@@ -121,7 +122,7 @@ export default function AnnouncementsPage() {
       )}
 
       {loading ? (
-        <p className="muted">Carregando…</p>
+        <Loading label="Carregando…" />
       ) : items.length === 0 ? (
         <p className="empty">Nenhum comunicado ainda. Use-os para avisar obras, mudanças de regras ou lembretes gerais.</p>
       ) : (
@@ -140,11 +141,11 @@ export default function AnnouncementsPage() {
                 <>
                   <button className="primary" onClick={() => publish(a)}>Publicar</button>
                   <button onClick={() => open(a)}>Editar</button>
-                  <button className="danger" onClick={() => window.confirm('Excluir este rascunho?') && run(() => comm.deleteAnnouncement(a.id))}>Excluir</button>
+                  <button className="danger" onClick={async () => (await ask('Excluir este rascunho?')) && run(() => comm.deleteAnnouncement(a.id))}>Excluir</button>
                 </>
               )}
               {a.status === 'publicado' && (
-                <button onClick={() => window.confirm('Arquivar? O comunicado deixa de aparecer na área do cliente.') && run(() => comm.archiveAnnouncement(a.id))}>Arquivar</button>
+                <button onClick={async () => (await ask('Arquivar? O comunicado deixa de aparecer na área do cliente.')) && run(() => comm.archiveAnnouncement(a.id))}>Arquivar</button>
               )}
             </div>
           </article>

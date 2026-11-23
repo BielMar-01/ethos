@@ -116,6 +116,9 @@ export const ENDPOINTS: Endpoint[] = [
     responseExample: { unread: 2, items: [{ id: 51, category: "financeiro", kind: "payment_received", title: "Pagamento identificado", body: "R$ 2.500,00 · recibo nº 57", link_kind: "payment", link_id: 88, read_at: null, created_at: "2026-11-04T15:00:00Z" }] } },
   { tag: "Comunicados e notificações", method: "post", path: "/api/reminders/run", summary: "Gera os lembretes agora (vencimento próximo, atraso, fim de contrato)", description: "Idempotente. Também roda sozinho a cada 6 horas.", access: "admin", apiKey: false, status: 200,
     responseExample: { dueSoon: 3, overdue: 1, overdueDigest: 1, leasesEnding: 2 } },
+  { tag: "Auditoria", method: "get", path: "/api/audit", summary: "Registro de auditoria da organização", description: "Somente administrador logado (chave de API não acessa). Paginação por cursor: envie next_before como before.", access: "admin", apiKey: false, status: 200,
+    query: [{ name: "q", description: "Texto livre (ação, pessoa, e-mail, IP)", example: "contrato" }, { name: "kind", description: "create, update, delete, action, auth, denied", example: "denied" }, { name: "from", description: "AAAA-MM-DD", example: "2026-11-01" }, { name: "to", description: "AAAA-MM-DD (inclusivo)", example: "2026-11-30" }],
+    responseExample: { items: [{ id: 501, user_name: "Ana Admin", role: "admin", kind: "action", entity: "payments", entity_id: 88, summary: "Estornou pagamento", status: 200, ip: "203.0.113.7", created_at: "2026-11-23T14:20:00Z" }], next_before: 480 } },
   { tag: "Comunicados e notificações", method: "get", path: "/api/portal/announcements", summary: "Comunicados que se aplicam a mim", access: "cliente", apiKey: false, status: 200,
     responseExample: list({ id: 3, title: "Obras na fachada", body: "Entre os dias 10 e 20…", audience: "inquilinos", published_at: "2026-11-10T12:00:00Z", property_name: null }) },
   // ---- Área do cliente

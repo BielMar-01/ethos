@@ -14,6 +14,7 @@ import {
 } from './api'
 import { brl, date, dateTime } from './format'
 import { ClientAnnouncements, ClientInspections, OwnerMaintenance, TenantMaintenance } from './PortalWork'
+import { Alert, Loading } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -37,8 +38,8 @@ export default function PortalPage({ role, initialTab }: { role: Role; initialTa
     api.portalMe().then(setMe).catch((e) => setError(message(e)))
   }, [])
 
-  if (error) return <p className="error" role="alert">{error}</p>
-  if (!me) return <p className="muted">Carregando…</p>
+  if (error) return <Alert>{error}</Alert>
+  if (!me) return <Loading label="Carregando…" />
   if (!me.linked) {
     return (
       <p className="empty">
@@ -112,7 +113,7 @@ function TenantArea({ initialTab }: { initialTab?: string }) {
 
   return (
     <>
-      {error && <p className="error no-print" role="alert">{error}</p>}
+      {error && <Alert className="no-print">{error}</Alert>}
 
       {paper && (
         <div className="panel print-area">
@@ -268,7 +269,7 @@ function OwnerArea({ initialTab }: { initialTab?: string }) {
 
   return (
     <>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <Alert>{error}</Alert>}
       <div className="cards">
         <div className="stat"><span>Imóveis</span><strong>{properties.length}</strong></div>
         <div className="stat"><span>Unidades ocupadas</span><strong>{occupied} / {units.length}</strong></div>

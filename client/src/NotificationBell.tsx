@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from './Icon'
 import { comm, type AppNotification } from './commApi'
 import { timeAgo } from './format'
+import { Loading } from './feedback'
 
 const CATEGORY_LABEL: Record<string, string> = {
   financeiro: 'Financeiro',
@@ -108,7 +109,7 @@ export default function NotificationBell({
             </span>
           </div>
           {loading ? (
-            <p className="muted" style={{ padding: '1rem' }}>Carregando…</p>
+            <Loading label="Carregando…" />
           ) : items.length === 0 ? (
             <p className="muted" style={{ padding: '1.2rem', textAlign: 'center' }}>Nada por aqui ainda.</p>
           ) : (

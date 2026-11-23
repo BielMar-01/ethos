@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { comm, type AppNotification, type NotifPref } from './commApi'
 import { dateTime, timeAgo } from './format'
+import { Alert, Toast, Loading } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -79,13 +80,13 @@ export default function NotificationsPage({ onOpenItem, isStaff }: { onOpenItem:
         </label>
         <button onClick={readAll} disabled={unread === 0}>Marcar todas como lidas</button>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
-      {notice && <p className="notice" role="status">{notice}</p>}
+      {error && <Alert>{error}</Alert>}
+      {notice && <Toast>{notice}</Toast>}
 
       <div className="dash-cols">
         <div className="panel" style={{ padding: 0 }}>
           {loading ? (
-            <p className="muted" style={{ padding: '1rem' }}>Carregando…</p>
+            <Loading label="Carregando…" />
           ) : items.length === 0 ? (
             <p className="empty" style={{ border: 'none' }}>{onlyUnread ? 'Nenhuma notificação não lida.' : 'Você ainda não tem notificações.'}</p>
           ) : (

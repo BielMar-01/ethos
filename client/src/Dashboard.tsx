@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { comm, type DashboardData } from './commApi'
 import { brl } from './format'
 import Icon from './Icon'
+import { Alert, Loading } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -19,8 +20,8 @@ export default function Dashboard({ name, onNavigate }: { name: string; onNaviga
     comm.dashboard().then(setD).catch((e) => setError(message(e)))
   }, [])
 
-  if (error) return <p className="error" role="alert">{error}</p>
-  if (!d) return <p className="muted">Carregando…</p>
+  if (error) return <Alert>{error}</Alert>
+  if (!d) return <Loading label="Carregando…" />
 
   const { counts: c, finance: f } = d
   const occupancy = c.units.total > 0 ? Math.round((c.units.occupied / c.units.total) * 100) : null
