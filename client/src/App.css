@@ -191,3 +191,37 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
 .method-delete { color: var(--danger); }
 .key-badge { font-size: 0.68rem; }
 .key-once { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.8rem; border: 1px solid var(--accent); border-radius: 8px; }
+
+/* ---- Manutenção, vistorias e fotos ---- */
+.photo-strip { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.photo { position: relative; display: inline-block; }
+.photo img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); display: block; }
+.photo-x { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; padding: 0; border-radius: 50%; line-height: 1; background: var(--surface); }
+.photo-add { height: 72px; padding: 0 0.8rem; border-style: dashed; color: var(--muted); }
+.badge-p-baixa { color: var(--muted); }
+.badge-p-media { color: #5b9bd5; }
+.badge-p-alta { color: #d9a441; }
+.badge-p-urgente { color: var(--danger); }
+.badge-m-aberta, .badge-m-em_analise { color: #5b9bd5; }
+.badge-m-aguardando_aprovacao, .badge-m-aprovada { color: #d9a441; }
+.badge-m-em_execucao { color: var(--accent); }
+.badge-m-concluida { color: #3fb27f; }
+.badge-m-cancelada { color: var(--muted); }
+.badge-i-agendada, .badge-i-cancelada { color: var(--muted); }
+.badge-i-em_andamento { color: var(--accent); }
+.badge-i-concluida { color: #3fb27f; }
+.timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.timeline li { border-left: 2px solid var(--border); padding-left: 0.8rem; }
+.timeline li.internal { border-left-color: var(--accent); }
+.timeline .meta { color: var(--muted); font-size: 0.78rem; }
+.progress { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.progress > span { display: block; height: 100%; background: var(--accent); }
+.room { margin: 1rem 0 0.4rem; font-size: 1rem; }
+.check-row { display: grid; grid-template-columns: minmax(130px, 1.2fr) 150px minmax(160px, 2fr); gap: 0.6rem; align-items: start; padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+.check-row .photo-strip { grid-column: 2 / -1; }
+.cond-novo, .cond-bom { color: #3fb27f; }
+.cond-regular { color: #d9a441; }
+.cond-ruim, .cond-danificado { color: var(--danger); }
+.change-piorou td { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.change-melhorou td { background: color-mix(in srgb, #3fb27f 10%, transparent); }
+@media (max-width: 720px) { .check-row { grid-template-columns: 1fr; } .check-row .photo-strip { grid-column: auto; } }

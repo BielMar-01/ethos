@@ -250,7 +250,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   inquilino: 'Inquilino',
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -261,7 +261,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T
 }
 
-const json = (method: string, body: unknown): RequestInit => ({
+export const json = (method: string, body: unknown): RequestInit => ({
   method,
   body: JSON.stringify(body),
 })

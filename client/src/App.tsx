@@ -4,6 +4,8 @@ import PasswordInput from './PasswordInput'
 import ResourcePage from './ResourcePage'
 import ApiPage from './ApiPage'
 import FinancePage from './FinancePage'
+import InspectionsPage from './InspectionsPage'
+import MaintenancePage from './MaintenancePage'
 import LeasesPage from './LeasesPage'
 import PortalPage from './PortalPage'
 import TeamPage from './TeamPage'
@@ -250,6 +252,8 @@ const TEAM = 'team'
 const LEASES = 'leases'
 const FINANCE = 'finance'
 const API = 'api'
+const MAINT = 'maintenance'
+const INSPECT = 'inspections'
 const TEMPLATES = 'templates'
 
 function Shell({ session, onLogout, onSession }: { session: Session; onLogout: () => void; onSession: (s: Session) => void }) {
@@ -291,6 +295,12 @@ function Shell({ session, onLogout, onSession }: { session: Session; onLogout: (
               </button>
               <button className={current === FINANCE ? 'nav active' : 'nav'} onClick={() => setCurrent(FINANCE)}>
                 Financeiro
+              </button>
+              <button className={current === MAINT ? 'nav active' : 'nav'} onClick={() => setCurrent(MAINT)}>
+                Manutenção
+              </button>
+              <button className={current === INSPECT ? 'nav active' : 'nav'} onClick={() => setCurrent(INSPECT)}>
+                Vistorias
               </button>
               <button className={current === TEMPLATES ? 'nav active' : 'nav'} onClick={() => setCurrent(TEMPLATES)}>
                 Modelos
@@ -337,6 +347,10 @@ function Shell({ session, onLogout, onSession }: { session: Session; onLogout: (
             <LeasesPage key={`leases-${session.organization.id}`} isAdmin={isAdmin} />
           ) : current === FINANCE && isStaff ? (
             <FinancePage key={`finance-${session.organization.id}`} isAdmin={isAdmin} />
+          ) : current === MAINT && isStaff ? (
+            <MaintenancePage key={`maint-${session.organization.id}`} isAdmin={isAdmin} currentUserId={session.user.id} />
+          ) : current === INSPECT && isStaff ? (
+            <InspectionsPage key={`insp-${session.organization.id}`} />
           ) : current === TEMPLATES && isStaff ? (
             <TemplatesPage key={`templates-${session.organization.id}`} canDelete={isAdmin} />
           ) : current === API && isStaff ? (

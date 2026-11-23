@@ -13,6 +13,7 @@ import {
   type Transfer,
 } from './api'
 import { brl, date, dateTime } from './format'
+import { ClientInspections, OwnerMaintenance, TenantMaintenance } from './PortalWork'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -59,7 +60,7 @@ export default function PortalPage({ role }: { role: Role }) {
 // ------------------------------------------------------------------ Inquilino
 
 function TenantArea() {
-  const [tab, setTab] = useState<'finance' | 'contract'>('finance')
+  const [tab, setTab] = useState<'finance' | 'contract' | 'maintenance' | 'inspections'>('finance')
   const [leases, setLeases] = useState<PortalLease[]>([])
   const [charges, setCharges] = useState<PortalCharge[]>([])
   const [payments, setPayments] = useState<PortalPayment[]>([])
@@ -141,10 +142,16 @@ function TenantArea() {
       <div className="tabs no-print" role="tablist">
         <button role="tab" aria-selected={tab === 'finance'} className={tab === 'finance' ? 'tab active' : 'tab'} onClick={() => setTab('finance')}>Cobranças e pagamentos</button>
         <button role="tab" aria-selected={tab === 'contract'} className={tab === 'contract' ? 'tab active' : 'tab'} onClick={() => setTab('contract')}>Meu contrato</button>
+        <button role="tab" aria-selected={tab === 'maintenance'} className={tab === 'maintenance' ? 'tab active' : 'tab'} onClick={() => setTab('maintenance')}>Manutenção</button>
+        <button role="tab" aria-selected={tab === 'inspections'} className={tab === 'inspections' ? 'tab active' : 'tab'} onClick={() => setTab('inspections')}>Vistorias</button>
       </div>
 
       <div className="no-print">
-        {tab === 'finance' ? (
+        {tab === 'maintenance' ? (
+          <TenantMaintenance leases={leases} />
+        ) : tab === 'inspections' ? (
+          <ClientInspections who="tenant" />
+        ) : tab === 'finance' ? (
           <>
             <h3>Cobranças</h3>
             {charges.length === 0 ? (
@@ -231,7 +238,7 @@ function TenantArea() {
 // ---------------------------------------------------------------- Proprietário
 
 function OwnerArea() {
-  const [tab, setTab] = useState<'properties' | 'transfers'>('properties')
+  const [tab, setTab] = useState<'properties' | 'transfers' | 'maintenance' | 'inspections'>('properties')
   const [properties, setProperties] = useState<PortalProperty[]>([])
   const [units, setUnits] = useState<PortalUnit[]>([])
   const [transfers, setTransfers] = useState<Omit<Transfer, 'owner_id' | 'owner_name'>[]>([])
@@ -264,9 +271,15 @@ function OwnerArea() {
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'properties'} className={tab === 'properties' ? 'tab active' : 'tab'} onClick={() => setTab('properties')}>Meus imóveis</button>
         <button role="tab" aria-selected={tab === 'transfers'} className={tab === 'transfers' ? 'tab active' : 'tab'} onClick={() => setTab('transfers')}>Repasses</button>
+        <button role="tab" aria-selected={tab === 'maintenance'} className={tab === 'maintenance' ? 'tab active' : 'tab'} onClick={() => setTab('maintenance')}>Manutenção</button>
+        <button role="tab" aria-selected={tab === 'inspections'} className={tab === 'inspections' ? 'tab active' : 'tab'} onClick={() => setTab('inspections')}>Vistorias</button>
       </div>
 
-      {tab === 'properties' ? (
+      {tab === 'maintenance' ? (
+        <OwnerMaintenance />
+      ) : tab === 'inspections' ? (
+        <ClientInspections who="owner" />
+      ) : tab === 'properties' ? (
         units.length === 0 ? (
           <p className="empty">Nenhum imóvel vinculado ao seu cadastro.</p>
         ) : (
