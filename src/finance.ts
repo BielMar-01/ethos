@@ -40,14 +40,14 @@ const TENANT_NAMES = `(SELECT string_agg(t.name, ', ' ORDER BY lt.position)
 // --------------------------------------------------------------- Datas (mês)
 
 /** "2026-11" → limites do mês; undefined se inválido. */
-function monthRange(month: unknown): { start: string; next: string; days: number } | undefined {
+export function monthRange(month: unknown): { start: string; next: string; days: number } | undefined {
   if (typeof month !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return undefined;
   const [y, m] = month.split("-").map(Number) as [number, number];
   const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
   return { start: `${month}-01`, next, days: new Date(Date.UTC(y, m, 0)).getUTCDate() };
 }
 
-const brToday = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date());
+export const brToday = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date());
 
 // ------------------------------------------------------------------ Cobranças
 

@@ -21,9 +21,11 @@
 - ✅ **Vistorias**: checklist por ambiente, fotos, conclusão só com tudo avaliado, laudo, registro de ciência, comparação entrada × saída, imutável depois de concluída.
 - ✅ **Comunicados e notificações**: comunicados por público (todos, inquilinos, proprietários, imóvel); notificações internas por eventos; **lembretes automáticos** (vencimento próximo, atraso, fim de contrato); preferências por categoria.
 - ✅ **Registros de atividade (auditoria)**: toda escrita e toda negação de permissão, login e login falho; só o admin vê; filtros, paginação e CSV; imutável.
+- 🟡 **Boletos pelo Asaas** (individual e em lote, aba Boletos em Financeiro, multa/juros configuráveis): **nunca testado contra o Asaas real** (os testes simulam a API); boleto pago só muda de status — a baixa é manual. Migração 012.
+- ✅ **Máscaras** de telefone, CPF/CNPJ, CEP e moeda; importação de **contratos, cobranças e vistorias**, por CSV, Excel (.xlsx) ou colando da planilha.
 - 🟡 **IA multiprovedor** para ler documentos: Claude, GPT, Gemini, Grok, DeepSeek, Mistral, Groq, Together, OpenRouter e compatíveis, com um principal por organização. **Nunca testada contra os serviços reais** (os testes simulam as respostas); os nomes de modelos sugeridos podem estar desatualizados — o admin digita o ID exato.
 - ✅ **Modais em todo o sistema**: criar, editar, visualizar, detalhar e excluir abrem em modal responsivo (tela cheia no celular).
-- 🟡 **Integrações (admin)**: Asaas (guarda e testa a chave), IA da organização, **webhooks de saída assinados** (n8n/Make/Zapier) e chaves de API. **Falta**: emitir boleto/Pix/cartão pelo Asaas, receber o webhook do Asaas (conciliação), escrita via API/n8n → Ethos (chaves hoje são só leitura), reenvio manual de entregas que falharam. O teste do Asaas e da Anthropic usa chamadas reais só quando o admin clica em Testar — **não foi exercitado contra os serviços reais**.
+- 🟡 **Integrações (admin)**: Asaas (guarda e testa a chave), IA da organização, **webhooks de saída assinados** (n8n/Make/Zapier) e chaves de API. **Falta**: Pix/cartão pelo Asaas, receber o webhook do Asaas (baixa automática do boleto pago), escrita via API/n8n → Ethos (chaves hoje são só leitura), reenvio manual de entregas que falharam. O teste do Asaas e da Anthropic usa chamadas reais só quando o admin clica em Testar — **não foi exercitado contra os serviços reais**.
 - ✅ **CEP**: máscara e preenchimento automático do endereço (ViaCEP → BrasilAPI, via servidor).
 - 🟡 **Cadastro por documento (IA)**: foto/PDF de RG, CNH, contrato, matrícula, IPTU → sugestões de proprietário, inquilino, imóvel, unidade e **rascunho** de contrato, com revisão antes de gravar. **Só liga com `ANTHROPIC_API_KEY`; nunca testado com a API real** (os testes usam cliente falso). Qualidade de leitura depende do documento: sempre conferir.
 - ✅ **Testes E2E em navegador (Playwright)**: 70 testes (desktop e celular) sobre o demo; rodam no CI.
@@ -55,7 +57,7 @@
 
 ### Produto (módulos previstos na documentação)
 8. ⬜ **Contratos**: renovação, aditivos, reajustes, rescisão detalhada (multa), anexos, assinatura eletrônica qualificada.
-9. ⬜ **Financeiro**: multa e juros automáticos, pro rata do primeiro mês, descontos, boleto/Pix e conciliação bancária, despesas de manutenção e abatimento no repasse, informe de rendimentos, valor por extenso no recibo.
+9. ⬜ **Financeiro**: multa e juros automáticos, pro rata do primeiro mês, descontos, Pix, baixa automática de boleto e conciliação bancária, despesas de manutenção e abatimento no repasse, informe de rendimentos, valor por extenso no recibo.
 10. ⬜ **Relatórios** (receita por período, inadimplência, vacância, desempenho da carteira) com exportação (CSV/PDF) e gráficos no painel.
 11. ⬜ **Documentos gerais** (upload de documentos de pessoas e imóveis com controle de acesso).
 12. ⬜ **Cadastros mais ricos**: dados bancários, estado civil, profissão, endereço, vários contatos; validação e deduplicação de CPF/CNPJ; características do imóvel e fotos das unidades.

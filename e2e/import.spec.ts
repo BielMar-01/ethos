@@ -66,10 +66,10 @@ test.describe("importação em massa", () => {
     expect(owners.some((o: { name: string }) => o.name === good)).toBe(false);
   });
 
-  test("arquivo que não é CSV é recusado com orientação; tipo desconhecido exige escolha", async ({ page }) => {
+  test("arquivo de tipo não aceito é recusado com orientação; tipo desconhecido exige escolha", async ({ page }) => {
     await openImport(page);
-    await page.locator('input[type="file"]').setInputFiles({ name: "planilha.xlsx", mimeType: "application/vnd.ms-excel", buffer: Buffer.from("x") });
-    await expect(page.getByText("Salvar como → CSV UTF-8")).toBeVisible();
+    await page.locator('input[type="file"]').setInputFiles({ name: "planilha.pdf", mimeType: "application/pdf", buffer: Buffer.from("x") });
+    await expect(page.getByText("não é um arquivo aceito")).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles(csv("dados.csv", "nome;documento\nAlguém;123\n"));
     await expect(page.getByText("Escolha o tipo dos arquivos marcados para continuar.")).toBeVisible();
     await expect(page.getByRole("button", { name: /Conferir antes de importar/ })).toBeDisabled();

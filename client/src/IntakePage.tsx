@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { api, json, request } from './api'
 import { cepDigits, lookupCep, maskCep } from './cep'
+import MaskedInput, { maskWarning } from './MaskedInput'
+import { maskDocument, maskMoney, maskPhone } from './masks'
 import { Alert, errorText, toast } from './feedback'
 import { brl, parseReais } from './format'
 import { prepareImage } from './photos'
@@ -332,11 +334,11 @@ export default function IntakePage({ onNavigate }: { onNavigate: (key: string) =
               </label>
               <label>Nome<input value={p.name} onChange={(e) => setPerson(i, { name: e.target.value })} /></label>
               <label>CPF/CNPJ
-                <input value={p.document} onChange={(e) => setPerson(i, { document: e.target.value, valid: null })} />
+                <MaskedInput kind="document" value={maskDocument(p.document)} onValue={(v) => setPerson(i, { document: v, valid: null })} />
                 {p.valid === false && <small className="cep-hint error">Dígitos verificadores não conferem: confira o número.</small>}
               </label>
               <label>E-mail<input type="email" value={p.email} onChange={(e) => setPerson(i, { email: e.target.value })} /></label>
-              <label>Telefone<input value={p.phone} onChange={(e) => setPerson(i, { phone: e.target.value })} /></label>
+              <label>Telefone<MaskedInput kind="phone" value={maskPhone(p.phone)} onValue={(v) => setPerson(i, { phone: v })} />{maskWarning('phone', p.phone) && <small className="mask-hint">{maskWarning('phone', p.phone)}</small>}</label>
               <button className="danger" onClick={() => setDraft((d) => d && { ...d, people: d.people.filter((_, j) => j !== i) })}>Remover</button>
             </div>
           ))}
@@ -374,7 +376,7 @@ export default function IntakePage({ onNavigate }: { onNavigate: (key: string) =
           <div className="form-grid">
             <label>Início<input type="date" value={draft.lease.start_date} onChange={(e) => setLease('start_date', e.target.value)} /></label>
             <label>Fim<input type="date" value={draft.lease.end_date} onChange={(e) => setLease('end_date', e.target.value)} /></label>
-            <label>Aluguel (R$)<input value={draft.lease.rent} inputMode="decimal" onChange={(e) => setLease('rent', e.target.value)} /></label>
+            <label>Aluguel<MaskedInput kind="money" value={maskMoney(draft.lease.rent.replace(/D/g, ''))} onValue={(v) => setLease('rent', v)} /></label>
             <label>Dia do vencimento<input value={draft.lease.due_day} inputMode="numeric" onChange={(e) => setLease('due_day', e.target.value)} /></label>
             <label className="span-all">Garantia<input value={draft.lease.guarantee} onChange={(e) => setLease('guarantee', e.target.value)} /></label>
           </div>

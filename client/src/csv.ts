@@ -75,3 +75,26 @@ export function downloadCsv(filename: string, headers: string[], example: string
   a.click()
   URL.revokeObjectURL(url)
 }
+
+const pad = (n: number) => String(n).padStart(2, '0')
+
+/** Planilha Excel (.xlsx), primeira aba. Datas viram dd/mm/aaaa; CPF/CNPJ/CEP que o Excel guardou como número recuperam os zeros à esquerda. */
+export async function readXlsxFile(file: File): Promise<ParsedCsv> {
+  const { readSheet } = await import('read-excel-file/universal')
+  const data = await readSheet(await file.arrayBuffer())
+  const table = data.filter((r) => r.some((c) => c !== null && String(c).trim() !== ''))
+  const headers = (table[0] ?? []).map((h) => String(h ?? '').trim())
+  const cell = (v: unknown, header: string): string => {
+    if (v === null || v === undefined) return ''
+    if (v instanceof Date) return `${pad(v.getUTCDate())}/${pad(v.getUTCMonth() + 1)}/${v.getUTCFullYear()}`
+    if (typeof v === 'number') {
+      const h = header.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+      if (/cpf|cnpj|documento/.test(h) && Number.isInteger(v)) return String(v).padStart(v > 99_999_999_999 ? 14 : 11, '0')
+      if (/cep/.test(h) && Number.isInteger(v)) return String(v).padStart(8, '0')
+      return String(v).replace('.', ',')
+    }
+    return String(v).trim()
+  }
+  const rows = table.slice(1).map((r) => Object.fromEntries(headers.map((h, i) => [h, cell(r[i], h)]).filter(([h]) => h)))
+  return { headers: headers.filter(Boolean), rows }
+}

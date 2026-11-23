@@ -114,7 +114,7 @@ const SECURITY = [
 ]
 
 const FAQ = [
-  { q: 'A Ethos emite boleto ou Pix?', a: 'Ainda não. Hoje você registra o recebimento e a Ethos cuida da baixa, do recibo e do repasse. Boleto e Pix estão no roteiro.' },
+  { q: 'A Ethos emite boleto?', a: 'Sim, pelo Asaas (que você conecta com a sua conta): um a um ou em lote, a partir das cobranças. O pagamento é registrado na Ethos, que cuida da baixa, do recibo e do repasse. Pix e baixa automática estão no roteiro.' },
   { q: 'Os contratos têm validade jurídica?', a: 'Você usa o modelo aprovado pela sua administração ou pelo seu jurídico. A Ethos preenche os dados e guarda o documento emitido, mas não presume a validade de cláusulas.' },
   { q: 'Já tenho minha base em planilhas. Dá para trazer?', a: 'Dá. Você envia arquivos CSV de proprietários, inquilinos, imóveis e unidades — vários de uma vez —, confere o que será criado e só então importa. Quem já existe não é duplicado.' },
   { q: 'Como meus clientes acessam?', a: 'Pelo convite que você gera na página Equipe, já vinculado ao cadastro da pessoa. Cada um enxerga só o que é seu.' },
@@ -286,7 +286,7 @@ export default function LandingPage() {
             </Reveal>
           ))}
         </div>
-        <p className="muted small" style={{ textAlign: 'center' }}>No roteiro: boleto e Pix, e notificações por e-mail e WhatsApp.</p>
+        <p className="muted small" style={{ textAlign: 'center' }}>No roteiro: Pix, baixa automática de boletos, e notificações por e-mail e WhatsApp.</p>
       </section>
 
       <section className="cta-banner">

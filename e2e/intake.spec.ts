@@ -67,7 +67,7 @@ test.describe("cadastro por documento (leitura automática)", () => {
     await expect(page.getByText("Dígitos verificadores não conferem")).toBeVisible();
     await expect(page.getByLabel("Rua")).toHaveValue(street);
     await expect(page.getByLabel("Identificação")).toHaveValue("Apto 7");
-    await expect(page.getByLabel("Aluguel (R$)")).toHaveValue("1900,00");
+    await expect(page.getByLabel(/^Aluguel/)).toHaveValue("1.900,00");
     await expect(page.getByLabel("Dia do vencimento")).toHaveValue("10");
     await page.getByLabel("Quartos").fill("3"); // o usuário corrige antes de salvar
 

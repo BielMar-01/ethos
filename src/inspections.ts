@@ -15,7 +15,7 @@ export const TYPE_LABEL: Record<string, string> = { entrada: "ENTRADA", saida: "
 export const CONDITION_LABEL: Record<Condition, string> = { novo: "Novo", bom: "Bom", regular: "Regular", ruim: "Ruim", danificado: "Danificado" };
 const RANK: Record<Condition, number> = { novo: 0, bom: 1, regular: 2, ruim: 3, danificado: 4 };
 
-const DEFAULT_CHECKLIST: Record<string, string[]> = {
+export const DEFAULT_CHECKLIST: Record<string, string[]> = {
   Sala: ["Paredes", "Piso", "Teto", "Portas", "Janelas", "Iluminação e tomadas"],
   Cozinha: ["Paredes", "Piso", "Pia e torneira", "Armários", "Iluminação e tomadas"],
   Banheiro: ["Paredes", "Piso", "Vaso sanitário", "Chuveiro", "Pia e torneira", "Box"],

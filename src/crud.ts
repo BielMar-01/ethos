@@ -50,6 +50,8 @@ export async function validate(
     }
     if (v === null || v === "") {
       if (f.required) return { error: `Campo obrigatório: ${f.name}` };
+      // Enum vazio = "não informado": usa o padrão do banco (criar) ou mantém o valor (editar). Gravar NULL violaria NOT NULL.
+      if (f.kind === "enum") continue;
       values[f.name] = null;
       continue;
     }

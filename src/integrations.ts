@@ -10,7 +10,7 @@ import { assertPublicUrl } from "./webhooks.js";
 
 /**
  * Integrações com serviços externos, configuradas por organização e só pelo administrador:
- *  - Asaas (pagamentos): guarda a chave e o ambiente e testa a conexão. Emitir boleto/Pix/cartão ainda NÃO existe.
+ *  - Asaas (pagamentos): guarda a chave, o ambiente e multa/juros do boleto; testa a conexão. Os boletos são emitidos em boletos.ts.
  *  - IA (leitura de documentos): Anthropic, OpenAI, Gemini, Grok, DeepSeek, Mistral, Groq, Together, OpenRouter ou qualquer
  *    endpoint compatível com a API da OpenAI. Pode haver vários configurados; UM é o "principal" e é o que a leitura usa.
  * As chaves ficam cifradas (ver secrets.ts) e NUNCA voltam para o navegador: só os 4 últimos caracteres.
@@ -40,6 +40,24 @@ const publicView = (r: Row | undefined) =>
 async function load(orgId: number, provider: string): Promise<Row | undefined> {
   const [row] = await db.query<Row>(`SELECT ${COLUMNS} FROM integrations WHERE organization_id = $1 AND provider = $2`, [orgId, provider]);
   return row;
+}
+
+export interface AsaasConfig { apiKey: string; env: keyof typeof ASAAS_URLS; fine: number; interest: number }
+
+/** Credenciais do Asaas da organização (ativas e legíveis) ou null. */
+export async function orgAsaas(orgId: number): Promise<AsaasConfig | null> {
+  const row = await load(orgId, "asaas");
+  if (!row?.secret_enc || !row.enabled) return null;
+  try {
+    return {
+      apiKey: decryptSecret(row.secret_enc),
+      env: row.config.environment === "production" ? "production" : "sandbox",
+      fine: Number(row.config.fine_percent) || 0,
+      interest: Number(row.config.interest_percent) || 0,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** O provedor de IA que a leitura de documentos deve usar nesta organização (ativo, com chave e marcado como principal). */
@@ -111,6 +129,12 @@ integrationsRouter.put("/integrations/:provider", async (req, res) => {
     const env = b.environment ?? config.environment ?? "sandbox";
     if (env !== "sandbox" && env !== "production") return void bad("Ambiente deve ser sandbox (testes) ou production.");
     config.environment = env;
+    for (const [field, label] of [["fine_percent", "multa"], ["interest_percent", "juros ao mês"]] as const) {
+      if (b[field] === undefined) continue;
+      const n = b[field] === "" || b[field] === null ? 0 : Number(b[field]);
+      if (!Number.isFinite(n) || n < 0 || n > 20) return void bad(`Percentual de ${label} inválido: use um número entre 0 e 20.`);
+      config[field] = Math.round(n * 100) / 100;
+    }
     if (apiKey && (apiKey.length < 20 || /\s/.test(apiKey))) return void bad("A chave do Asaas parece incompleta. Copie a chave inteira em Integrações › Chaves de API do Asaas.");
   } else {
     const def = aiProvider(provider)!;

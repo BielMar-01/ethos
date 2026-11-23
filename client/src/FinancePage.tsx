@@ -8,9 +8,12 @@ import {
   type Payment,
   type Transfer,
 } from './api'
-import { brl, date, parseReais, reaisInput } from './format'
+import { brl, date, parseReais } from './format'
+import MaskedInput from './MaskedInput'
+import { moneyFromCents } from './masks'
 import { Alert, Toast, Loading, ask } from './feedback'
 import Modal from './Modal'
+import BoletosTab, { BoletoDetail, BulkBoletoModal, IssueBoletoModal, chargeAcceptsBoleto, useBoletos, type Boleto } from './BoletosTab'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 const today = () => new Date().toLocaleDateString('sv-SE') // AAAA-MM-DD no fuso local
@@ -39,7 +42,7 @@ const KINDS = [
   ['aluguel', 'Aluguel (avulso)'],
 ] as const
 
-type Tab = 'charges' | 'payments' | 'transfers'
+type Tab = 'charges' | 'boletos' | 'payments' | 'transfers'
 
 export default function FinancePage({ isAdmin }: { isAdmin: boolean }) {
   const [tab, setTab] = useState<Tab>('charges')
@@ -128,7 +131,7 @@ export default function FinancePage({ isAdmin }: { isAdmin: boolean }) {
       )}
 
       <div className="tabs no-print" role="tablist">
-        {([['charges', 'Cobranças'], ['payments', 'Pagamentos'], ['transfers', 'Repasses']] as const).map(([k, label]) => (
+        {([['charges', 'Cobranças'], ['boletos', 'Boletos'], ['payments', 'Pagamentos'], ['transfers', 'Repasses']] as const).map(([k, label]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'tab active' : 'tab'} onClick={() => setTab(k)}>
             {label}
           </button>
@@ -137,6 +140,7 @@ export default function FinancePage({ isAdmin }: { isAdmin: boolean }) {
 
       <div className="no-print">
         {tab === 'charges' && <ChargesTab month={month} version={version} isAdmin={isAdmin} onChange={reload} onError={fail} onOk={ok} onReceipt={openReceipt} />}
+        {tab === 'boletos' && <BoletosTab month={month} version={version} isAdmin={isAdmin} onChange={reload} onError={fail} />}
         {tab === 'payments' && <PaymentsTab month={month} version={version} isAdmin={isAdmin} onChange={reload} onError={fail} onOk={ok} onReceipt={openReceipt} />}
         {tab === 'transfers' && <TransfersTab month={month} version={version} isAdmin={isAdmin} onChange={reload} onError={fail} onOk={ok} />}
       </div>
@@ -162,6 +166,11 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
   const [paying, setPaying] = useState<Charge | null>(null)
   const [adding, setAdding] = useState(false)
   const [viewing, setViewing] = useState<Charge | null>(null)
+  const [issuing, setIssuing] = useState<Charge | null>(null)
+  const [boleto, setBoleto] = useState<Boleto | null>(null)
+  const [bulk, setBulk] = useState(false)
+  const { info, byCharge, reload: reloadBoletos } = useBoletos(version)
+  const connected = Boolean(info?.connected)
 
   useEffect(() => {
     api
@@ -201,10 +210,14 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
           ))}
         </select>
         <span className="spacer" />
+        {connected && <button onClick={() => setBulk(true)}>Emitir boletos do mês</button>}
         <button onClick={() => setAdding(true)}>Nova cobrança avulsa</button>
         <button className="primary" onClick={generate}>Gerar aluguéis do mês</button>
       </div>
 
+      {bulk && <BulkBoletoModal month={month} onClose={() => setBulk(false)} onDone={() => { reloadBoletos(); onChange() }} />}
+      {issuing && <IssueBoletoModal charge={issuing} onClose={() => setIssuing(null)} onDone={() => { setIssuing(null); reloadBoletos(); onChange() }} />}
+      {boleto && <BoletoDetail boleto={boleto} isAdmin={isAdmin} onClose={() => setBoleto(null)} onChanged={() => { reloadBoletos(); onChange() }} />}
       {adding && (
         <Modal title="Nova cobrança avulsa" onClose={() => setAdding(false)}>
           <NewCharge onDone={() => { setAdding(false); onChange() }} onCancel={() => setAdding(false)} onError={onError} />
@@ -239,6 +252,19 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
                   }}
                 >
                   Cancelar cobrança
+                </button>
+              )}
+              {connected && chargeAcceptsBoleto(viewing) && (
+                <button
+                  onClick={() => {
+                    const c = viewing
+                    setViewing(null)
+                    const b = byCharge.get(c.id)
+                    if (b && (b.status === 'pendente' || b.status === 'vencida')) setBoleto(b)
+                    else setIssuing(c)
+                  }}
+                >
+                  {byCharge.get(viewing.id) && ['pendente', 'vencida'].includes(byCharge.get(viewing.id)!.status) ? 'Ver boleto' : 'Emitir boleto'}
                 </button>
               )}
               {(viewing.status === 'aberta' || viewing.status === 'parcial' || viewing.status === 'vencida') && (
@@ -287,6 +313,11 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
                   <td>{brl(c.paid_cents)}</td>
                   <td><span className={`badge badge-c-${c.status}`}>{STATUS_LABEL[c.status]}</span></td>
                   <td className="row-actions" onClick={(e) => e.stopPropagation()}>
+                    {connected && chargeAcceptsBoleto(c) && (
+                      byCharge.get(c.id) && ['pendente', 'vencida'].includes(byCharge.get(c.id)!.status)
+                        ? <button onClick={() => setBoleto(byCharge.get(c.id)!)}>Boleto</button>
+                        : <button onClick={() => setIssuing(c)}>Emitir boleto</button>
+                    )}
                     {(c.status === 'aberta' || c.status === 'parcial' || c.status === 'vencida') && (
                       <button onClick={() => setPaying(c)}>Receber</button>
                     )}
@@ -345,7 +376,7 @@ function NewCharge({ onDone, onCancel, onError }: { onDone: () => void; onCancel
       </label>
       <label>Descrição<input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={300} required /></label>
       <label>Vencimento<input type="date" value={due} onChange={(e) => setDue(e.target.value)} required /></label>
-      <label>Valor (R$)<input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="150,00" required /></label>
+      <label>Valor<MaskedInput kind="money" value={amount} onValue={setAmount} placeholder="150,00" required /></label>
       {formError && <Alert className="span-all">{formError}</Alert>}
       <div className="actions">
         <button type="button" onClick={onCancel}>Cancelar</button>
@@ -372,7 +403,7 @@ function ReceivePayment({ charge, onDone, onCancel, onError }: { charge: Charge;
         setOpen(list)
         // Pré-seleciona a cobrança clicada com o saldo em aberto.
         const target = list.find((c) => c.id === charge.id)
-        if (target) setAmounts({ [target.id]: reaisInput(target.amount_cents - target.paid_cents) })
+        if (target) setAmounts({ [target.id]: moneyFromCents(target.amount_cents - target.paid_cents) })
       })
       .catch(onError)
   }, [charge, onError])
@@ -408,12 +439,11 @@ function ReceivePayment({ charge, onDone, onCancel, onError }: { charge: Charge;
         {open.map((c) => (
           <label key={c.id} className="alloc">
             <span>{c.description} <span className="muted">(venc. {date(c.due_date)}, saldo {brl(c.amount_cents - c.paid_cents)})</span></span>
-            <input
+            <MaskedInput
+              kind="money"
               aria-label={`Valor para ${c.description}`}
               value={amounts[c.id] ?? ''}
-              placeholder="0,00"
-              inputMode="decimal"
-              onChange={(e) => setAmounts({ ...amounts, [c.id]: e.target.value })}
+              onValue={(v) => setAmounts({ ...amounts, [c.id]: v })}
             />
           </label>
         ))}

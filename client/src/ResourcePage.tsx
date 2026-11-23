@@ -4,11 +4,23 @@ import { cepDigits, lookupCep, maskCep } from './cep'
 import Modal from './Modal'
 import type { FieldDef, ResourceDef } from './resources'
 import { Alert, Loading, ask, toast } from './feedback'
+import { brl } from './format'
+import MaskedInput, { maskWarning } from './MaskedInput'
+import { centsFromMoney, maskDocument, maskPhone, moneyFromCents } from './masks'
 
 type FormState = Record<string, string>
 
 function toForm(fields: FieldDef[], item?: Item): FormState {
-  return Object.fromEntries(fields.map((f) => [f.name, item?.[f.name] != null ? String(item[f.name]) : '']))
+  return Object.fromEntries(
+    fields.map((f) => {
+      const v = item?.[f.name]
+      if (v == null) return [f.name, item ? '' : (f.default ?? '')]
+      if (f.type === 'money') return [f.name, moneyFromCents(Number(v))]
+      if (f.mask === 'phone') return [f.name, maskPhone(String(v))]
+      if (f.mask === 'document') return [f.name, maskDocument(String(v))]
+      return [f.name, String(v)]
+    }),
+  )
 }
 
 function toBody(fields: FieldDef[], form: FormState): Record<string, unknown> {
@@ -16,6 +28,7 @@ function toBody(fields: FieldDef[], form: FormState): Record<string, unknown> {
   for (const f of fields) {
     const v = form[f.name]
     if (v === '') body[f.name] = null
+    else if (f.type === 'money') body[f.name] = centsFromMoney(v)
     else body[f.name] = f.type === 'number' || f.type === 'ref' ? Number(v) : v
   }
   return body
@@ -91,18 +104,18 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
       else if (editing) await api.update(def.key, editing.id, body)
       setEditing(null)
       await load()
-      toast.success(`${def.singular[0].toUpperCase()}${def.singular.slice(1)} salvo com sucesso.`)
+      toast.success(`${def.singular[0].toUpperCase()}${def.singular.slice(1)} ${def.fem ? 'salva' : 'salvo'} com sucesso.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro inesperado')
     }
   }
 
   async function remove(item: Item) {
-    if (!(await ask(`Excluir este ${def.singular}? Esta ação não pode ser desfeita.`))) return
+    if (!(await ask(`Excluir ${def.fem ? "esta" : "este"} ${def.singular}? Esta ação não pode ser desfeita.`))) return
     try {
       await api.remove(def.key, item.id)
       await load()
-      toast.success(`${def.singular[0].toUpperCase()}${def.singular.slice(1)} excluído.`)
+      toast.success(`${def.singular[0].toUpperCase()}${def.singular.slice(1)} ${def.fem ? 'excluída' : 'excluído'}.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro inesperado')
     }
@@ -110,7 +123,10 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
 
   function display(f: FieldDef, item: Item): string {
     const v = item[f.name]
-    if (v == null) return '—'
+    if (v == null || v === '') return '—'
+    if (f.type === 'money') return brl(Number(v))
+    if (f.mask === 'phone') return maskPhone(String(v))
+    if (f.mask === 'document') return maskDocument(String(v))
     if (f.type === 'select') return f.options?.find((o) => o.value === v)?.label ?? String(v)
     if (f.type === 'ref') return String(refs[f.ref!]?.find((r) => r.id === v)?.name ?? v)
     return String(v)
@@ -134,7 +150,7 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
           onChange={(e) => setQuery(e.target.value)}
         />
         <button className="primary" onClick={() => open('new')}>
-          Novo {def.singular}
+          {def.fem ? 'Nova' : 'Novo'} {def.singular}
         </button>
       </div>
 
@@ -185,7 +201,7 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
       )}
 
       {editing && (
-        <Modal title={editing === 'new' ? `Novo ${def.singular}` : `Editar ${def.singular}`} onClose={() => setEditing(null)} size="md">
+        <Modal title={editing === 'new' ? `${def.fem ? 'Nova' : 'Novo'} ${def.singular}` : `Editar ${def.singular}`} onClose={() => setEditing(null)} size="md">
         <form className="form-grid" onSubmit={save}>
           {def.fields.map((f) => (
             <label key={f.name}>
@@ -216,6 +232,17 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
                     </option>
                   ))}
                 </select>
+              ) : f.type === 'money' || f.mask ? (
+                <>
+                  <MaskedInput
+                    name={f.name}
+                    kind={f.type === 'money' ? 'money' : f.mask!}
+                    value={form[f.name] ?? ''}
+                    required={f.required}
+                    onValue={(v) => setForm({ ...form, [f.name]: v })}
+                  />
+                  {f.mask && maskWarning(f.mask, form[f.name] ?? '') && <small className="mask-hint">{maskWarning(f.mask, form[f.name] ?? '')}</small>}
+                </>
               ) : (
                 <input
                   name={f.name}

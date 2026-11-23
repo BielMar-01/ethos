@@ -19,6 +19,7 @@ import { dashboardRouter } from "./dashboard.js";
 import { apiKeysRouter } from "./apikeys.js";
 import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
+import { boletosRouter } from "./boletos.js";
 import { importRouter } from "./importer.js";
 import { cepRouter } from "./cep.js";
 import { integrationsRouter } from "./integrations.js";
@@ -298,6 +299,7 @@ export function createApp() {
 
   // ---------- Financeiro ----------
   app.use("/api", financeRouter);
+  app.use("/api", boletosRouter);
 
   // ---------- Área do cliente, chaves de API e documentação ----------
   app.use("/api", maintenanceRouter);

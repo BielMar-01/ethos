@@ -9,11 +9,7 @@ export interface Address {
   complement: string
 }
 
-/** "01001000" → "01001-000" (aceita digitação parcial). */
-export function maskCep(value: string): string {
-  const d = value.replace(/\D/g, '').slice(0, 8)
-  return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d
-}
+export { maskCep } from './masks'
 
 export const cepDigits = (value: string) => value.replace(/\D/g, '')
 

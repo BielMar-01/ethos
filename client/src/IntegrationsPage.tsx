@@ -108,7 +108,7 @@ export default function IntegrationsPage() {
 
       <div className="integration-grid">
         <Card icon="wallet" title="Asaas" subtitle="Pagamentos: boleto, Pix e cartão" status={asaasBadge} onClick={() => setOpen('asaas')} cta={data.asaas.configured ? 'Gerenciar' : 'Conectar'}>
-          Guarde a chave de API e confirme a conexão. A emissão de cobranças pelo Asaas será liberada nas próximas versões.
+          Guarde a chave de API e confirme a conexão. Conectado, o Financeiro passa a emitir boletos (um a um ou em lote) a partir das cobranças.
         </Card>
         <Card
           icon="camera"
@@ -144,7 +144,7 @@ export default function IntegrationsPage() {
 
       <div className="panel soon">
         <strong>Em breve</strong>
-        <span className="muted">Cobranças pelo Asaas (boleto e Pix), conciliação automática, WhatsApp e e-mail, escrita via API.</span>
+        <span className="muted">Boleto/Pix com baixa automática, WhatsApp e e-mail, escrita via API.</span>
       </div>
 
       {open === 'asaas' && <AsaasModal conn={data.asaas} secretsReady={data.secrets_ready} onClose={close} />}
@@ -202,6 +202,8 @@ function AsaasModal({ conn, secretsReady, onClose }: { conn: Conn; secretsReady:
   const [env, setEnv] = useState(String(conn.config.environment ?? 'sandbox'))
   const [key, setKey] = useState('')
   const [enabled, setEnabled] = useState(conn.enabled || !conn.configured)
+  const [fine, setFine] = useState(String(conn.config.fine_percent ?? ''))
+  const [interest, setInterest] = useState(String(conn.config.interest_percent ?? ''))
   const [state, setState] = useState(conn)
   const [busy, setBusy] = useState<'' | 'save' | 'test'>('')
   const [error, setError] = useState('')
@@ -211,7 +213,7 @@ function AsaasModal({ conn, secretsReady, onClose }: { conn: Conn; secretsReady:
     setError('')
     setBusy('save')
     try {
-      const r = await request<{ integration: Conn }>('/api/integrations/asaas', json('PUT', { api_key: key || undefined, environment: env, enabled }))
+      const r = await request<{ integration: Conn }>('/api/integrations/asaas', json('PUT', { api_key: key || undefined, environment: env, enabled, fine_percent: fine, interest_percent: interest }))
       setState(r.integration)
       setKey('')
       toast.success('Configuração do Asaas salva.')
@@ -266,6 +268,17 @@ function AsaasModal({ conn, secretsReady, onClose }: { conn: Conn; secretsReady:
           Chave de API {state.hint && <span className="muted small">— guardada, termina em …{state.hint}</span>}
           <PasswordInput value={key} onChange={(e) => setKey(e.target.value)} placeholder={state.configured ? 'Deixe em branco para manter a atual' : 'Cole a chave do Asaas'} autoComplete="off" />
         </label>
+        <div className="form-grid">
+          <label>
+            Multa por atraso (%)
+            <input type="number" min="0" max="20" step="0.01" inputMode="decimal" value={fine} onChange={(e) => setFine(e.target.value)} placeholder="2" />
+          </label>
+          <label>
+            Juros ao mês (%)
+            <input type="number" min="0" max="20" step="0.01" inputMode="decimal" value={interest} onChange={(e) => setInterest(e.target.value)} placeholder="1" />
+          </label>
+        </div>
+        <p className="muted small">Aplicados pelo Asaas nos boletos emitidos (deixe em branco para não cobrar). Valem só para boletos novos.</p>
         <label className="check-line">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           <span>Integração ativa</span>

@@ -3,6 +3,7 @@ import { api, type Item, type Member } from './api'
 import { work, type MaintDetail, type MaintItem, type MaintStatus } from './workApi'
 import { CATEGORY, MAINT_STATUS, PRIORITY } from './labels'
 import { brl, dateTime, parseReais } from './format'
+import MaskedInput from './MaskedInput'
 import PhotoStrip from './PhotoStrip'
 import { Alert, Loading, toast } from './feedback'
 import Modal from './Modal'
@@ -346,7 +347,7 @@ function Detail({ id, isAdmin, currentUserId, onBack }: { id: number; isAdmin: b
         {(item.status === 'em_analise' || item.status === 'aguardando_aprovacao') && (
           <form className="inline" onSubmit={addQuote}>
             <input aria-label="Fornecedor" placeholder="Fornecedor" value={quote.supplier} onChange={(e) => setQuote({ ...quote, supplier: e.target.value })} required />
-            <input aria-label="Valor" placeholder="Valor (R$)" inputMode="decimal" className="narrow" value={quote.amount} onChange={(e) => setQuote({ ...quote, amount: e.target.value })} required />
+            <MaskedInput kind="money" aria-label="Valor" className="narrow" value={quote.amount} onValue={(v) => setQuote({ ...quote, amount: v })} required />
             <input aria-label="Observações" placeholder="Observações (opcional)" value={quote.notes} onChange={(e) => setQuote({ ...quote, notes: e.target.value })} />
             <button type="submit">Registrar orçamento</button>
           </form>

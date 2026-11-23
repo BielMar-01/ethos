@@ -1,11 +1,11 @@
 import { useRef, useState, type DragEvent } from 'react'
 import { Alert, Empty, errorText, toast } from './feedback'
-import { downloadCsv, readCsvFile } from './csv'
+import { downloadCsv, parseCsv, readCsvFile, readXlsxFile } from './csv'
 
-/** Importação em massa: vários arquivos CSV de uma vez (proprietários, inquilinos, imóveis, unidades), com simulação antes de gravar. */
+/** Importação em massa: vários arquivos (CSV ou Excel) ou dados colados da planilha, de 7 tipos, com simulação antes de gravar. */
 
-type Resource = 'owners' | 'tenants' | 'properties' | 'units'
-const ORDER: Resource[] = ['owners', 'tenants', 'properties', 'units']
+type Resource = 'owners' | 'tenants' | 'properties' | 'units' | 'leases' | 'charges' | 'inspections'
+const ORDER: Resource[] = ['owners', 'tenants', 'properties', 'units', 'leases', 'charges', 'inspections']
 
 const KINDS: Record<Resource, { label: string; file: string; headers: string[]; example: string[]; hint: string }> = {
   owners: {
@@ -36,6 +36,27 @@ const KINDS: Record<Resource, { label: string; file: string; headers: string[]; 
     example: ['Edifício Aurora', 'Apto 101', '2', '62', '2500,00', 'disponivel'],
     hint: 'O imóvel é indicado pelo nome (deve existir ou estar no mesmo envio). Situação: disponivel, ocupada ou manutencao.',
   },
+  leases: {
+    label: 'Contratos',
+    file: 'modelo-contratos.csv',
+    headers: ['imovel', 'unidade', 'locatarios', 'inicio', 'fim', 'aluguel', 'dia_vencimento', 'garantia', 'situacao', 'observacoes'],
+    example: ['Edifício Aurora', 'Apto 101', '987.654.321-00 | 111.222.333-96', '01/01/2026', '31/12/2026', '2500,00', '10', 'Caução de 3 aluguéis', 'vigente', ''],
+    hint: 'Unidade e locatários (documentos separados por |) devem existir ou estar no mesmo envio. Datas dd/mm/aaaa. Situação: rascunho (padrão), vigente, encerrado ou rescindido. Vigente não pode sobrepor outro vigente da unidade.',
+  },
+  charges: {
+    label: 'Cobranças',
+    file: 'modelo-cobrancas.csv',
+    headers: ['imovel', 'unidade', 'tipo', 'descricao', 'vencimento', 'valor'],
+    example: ['Edifício Aurora', 'Apto 101', 'aluguel', 'Aluguel 06/2026', '10/06/2026', '2500,00'],
+    hint: 'Vai para o contrato da unidade que cobre o vencimento (precisa existir, fora de rascunho). Tipo: aluguel (padrão), multa, juros, taxa ou outro; só o aluguel tem descrição automática. Repetidas são puladas.',
+  },
+  inspections: {
+    label: 'Vistorias',
+    file: 'modelo-vistorias.csv',
+    headers: ['imovel', 'unidade', 'tipo', 'data', 'observacoes'],
+    example: ['Edifício Aurora', 'Apto 101', 'entrada', '02/01/2026', ''],
+    hint: 'Entram como agendadas, já com o checklist padrão por ambiente. Tipo: entrada, saida ou periodica. Repetidas (mesma unidade, tipo e data) são puladas.',
+  },
 }
 
 interface FileEntry {
@@ -58,11 +79,17 @@ const canon = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerC
 /** Descobre o tipo pelo nome do arquivo e, se não der, pelas colunas. Vazio = o usuário escolhe. */
 function detect(name: string, headers: string[]): Resource | '' {
   const n = canon(name)
+  if (/contrato|lease|locacao/.test(n)) return 'leases'
+  if (/cobranc|boleto|charge|fatura/.test(n)) return 'charges'
+  if (/vistoria|inspec/.test(n)) return 'inspections'
   if (/proprietari|owner|donos?/.test(n)) return 'owners'
   if (/inquilin|locatari|tenant/.test(n)) return 'tenants'
   if (/unidade|unit|apto/.test(n)) return 'units'
   if (/imove|propert|predio/.test(n)) return 'properties'
   const h = headers.map(canon)
+  if (h.includes('locatarios') || h.includes('inicio')) return 'leases'
+  if (h.includes('vencimento') && h.includes('valor')) return 'charges'
+  if (h.includes('data') && h.includes('tipo') && h.includes('unidade')) return 'inspections'
   if (h.includes('identificador') || h.includes('unidade')) return 'units'
   if (h.includes('tipo') && !h.includes('documento') && !h.includes('cpf')) return 'properties'
   return ''
@@ -78,6 +105,8 @@ export default function ImportPage() {
   const [error, setError] = useState('')
   const [drag, setDrag] = useState(false)
   const input = useRef<HTMLInputElement>(null)
+  const [pasteKind, setPasteKind] = useState<Resource>('owners')
+  const [pasteText, setPasteText] = useState('')
 
   // Qualquer mudança nos arquivos invalida a simulação anterior.
   const change = (fn: (f: FileEntry[]) => FileEntry[]) => {
@@ -90,12 +119,16 @@ export default function ImportPage() {
   async function add(list: FileList | File[]) {
     const added: FileEntry[] = []
     for (const file of Array.from(list)) {
-      if (!/\.(csv|txt)$/i.test(file.name)) {
-        toast.error(`"${file.name}" não é CSV. No Excel: Arquivo → Salvar como → CSV UTF-8.`)
+      if (/\.xls$/i.test(file.name)) {
+        toast.error(`"${file.name}" é um Excel antigo (.xls). Abra no Excel e use Arquivo → Salvar como → Pasta de Trabalho do Excel (.xlsx) ou CSV UTF-8.`)
+        continue
+      }
+      if (!/\.(csv|txt|tsv|xlsx)$/i.test(file.name)) {
+        toast.error(`"${file.name}" não é um arquivo aceito. Use Excel (.xlsx) ou CSV.`)
         continue
       }
       try {
-        const parsed = await readCsvFile(file)
+        const parsed = /\.xlsx$/i.test(file.name) ? await readXlsxFile(file) : await readCsvFile(file)
         if (parsed.rows.length === 0) {
           toast.error(`"${file.name}" não tem linhas de dados (só o cabeçalho ou está vazio).`)
           continue
@@ -106,6 +139,18 @@ export default function ImportPage() {
       }
     }
     if (added.length) change((f) => [...f, ...added])
+  }
+
+  /** Dados copiados do Excel/Google Planilhas (colunas separadas por tabulação), com a primeira linha como cabeçalho. */
+  function addPasted() {
+    const parsed = parseCsv(pasteText)
+    if (parsed.headers.length === 0 || parsed.rows.length === 0) {
+      toast.error('Cole as células com a primeira linha de cabeçalho e ao menos uma linha de dados.')
+      return
+    }
+    change((f) => [...f, { id: nextId++, name: `Colado (${KINDS[pasteKind].label})`, kind: pasteKind, headers: parsed.headers, rows: parsed.rows }])
+    setPasteText('')
+    toast.success(`${parsed.rows.length} linha(s) adicionada(s).`)
   }
 
   function onDrop(e: DragEvent) {
@@ -120,7 +165,7 @@ export default function ImportPage() {
   /** Junta os arquivos do mesmo tipo e guarda de onde veio cada linha (para apontar o arquivo certo nos erros). */
   function build() {
     const sets: Partial<Record<Resource, Record<string, string>[]>> = {}
-    const segments: Record<Resource, { name: string; start: number; count: number }[]> = { owners: [], tenants: [], properties: [], units: [] }
+    const segments = Object.fromEntries(ORDER.map((r) => [r, [] as { name: string; start: number; count: number }[]])) as Record<Resource, { name: string; start: number; count: number }[]>
     for (const f of files) {
       if (!f.kind) continue
       const list = (sets[f.kind] ??= [])
@@ -178,7 +223,7 @@ export default function ImportPage() {
         <div>
           <h2>Importar dados</h2>
           <p className="muted page-sub">
-            Envie planilhas CSV de proprietários, inquilinos, imóveis e unidades — vários arquivos de uma vez. Antes de gravar, você vê o que seria criado; se houver erro, nada é importado.
+            Envie planilhas (Excel ou CSV) ou cole direto da planilha: proprietários, inquilinos, imóveis, unidades, contratos, cobranças e vistorias — vários de uma vez. Antes de gravar, você vê o que seria criado; se houver erro, nada é importado.
           </p>
         </div>
       </div>
@@ -195,7 +240,7 @@ export default function ImportPage() {
             </div>
           ))}
         </div>
-        <p className="muted small">Ordem automática: proprietários → inquilinos → imóveis → unidades. Por isso um imóvel pode citar proprietários, e uma unidade pode citar imóveis, que estão no mesmo envio.</p>
+        <p className="muted small">Ordem automática: proprietários → inquilinos → imóveis → unidades → contratos → cobranças → vistorias. Por isso cada tipo pode citar o anterior mesmo que ele esteja no mesmo envio. Telefone, CPF/CNPJ e CEP são padronizados na importação.</p>
       </div>
 
       <div className="panel">
@@ -213,12 +258,12 @@ export default function ImportPage() {
           tabIndex={0}
           onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current?.click()}
         >
-          <strong>Arraste os arquivos CSV aqui</strong>
+          <strong>Arraste os arquivos aqui (Excel .xlsx ou CSV)</strong>
           <span className="muted">ou clique para escolher (pode selecionar vários)</span>
           <input
             ref={input}
             type="file"
-            accept=".csv,.txt,text/csv"
+            accept=".csv,.txt,.tsv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             multiple
             hidden
             onChange={(e) => {
@@ -256,6 +301,28 @@ export default function ImportPage() {
           </div>
         )}
         {unassigned && files.length > 0 && <p className="muted small">Escolha o tipo dos arquivos marcados para continuar.</p>}
+      </div>
+
+      <div className="panel">
+        <h3>Ou cole direto da planilha</h3>
+        <p className="muted small">No Excel ou Google Planilhas, selecione as células <strong>incluindo a linha de títulos</strong>, copie (Ctrl+C) e cole aqui.</p>
+        <div className="paste-row">
+          <select aria-label="Tipo dos dados colados" value={pasteKind} onChange={(e) => setPasteKind(e.target.value as Resource)}>
+            {ORDER.map((r) => (
+              <option key={r} value={r}>{KINDS[r].label}</option>
+            ))}
+          </select>
+          <button disabled={!pasteText.trim()} onClick={addPasted}>Adicionar à lista</button>
+        </div>
+        <textarea
+          aria-label="Dados colados da planilha"
+          className="paste-box"
+          rows={5}
+          value={pasteText}
+          onChange={(e) => setPasteText(e.target.value)}
+          placeholder={KINDS[pasteKind].headers.join('\t')}
+          spellCheck={false}
+        />
       </div>
 
       {error && <Alert>{error}</Alert>}

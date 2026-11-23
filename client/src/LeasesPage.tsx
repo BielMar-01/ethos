@@ -9,7 +9,9 @@ import {
   type LeaseSummary,
   type Template,
 } from './api'
-import { brl, date, dateTime, parseReais, reaisInput } from './format'
+import { brl, date, dateTime, parseReais } from './format'
+import MaskedInput from './MaskedInput'
+import { moneyFromCents } from './masks'
 import { Alert, Toast, Loading, ask } from './feedback'
 import Modal from './Modal'
 
@@ -162,7 +164,7 @@ function LeaseForm({ id, onDone, onCancel }: { id?: number; onDone: (id: number)
           setTenantIds(d.tenants.map((x) => x.id))
           setStart(d.lease.start_date)
           setEnd(d.lease.end_date)
-          setRent(reaisInput(d.lease.rent_cents))
+          setRent(moneyFromCents(d.lease.rent_cents))
           setDueDay(String(d.lease.due_day))
           setGuarantee(d.lease.guarantee ?? '')
           setNotes(d.lease.notes ?? '')
@@ -242,7 +244,7 @@ function LeaseForm({ id, onDone, onCancel }: { id?: number; onDone: (id: number)
           </label>
           <label>
             Aluguel (R$)
-            <input value={rent} onChange={(e) => setRent(e.target.value)} placeholder="1.500,00" inputMode="decimal" required />
+            <MaskedInput kind="money" value={rent} onValue={setRent} placeholder="1.500,00" required />
           </label>
           <label>
             Início
