@@ -1,33 +1,13 @@
 import { useEffect, type ReactNode } from 'react'
 
+import Icon, { type IconName } from './Icon'
+import ThemeToggle from './ThemeToggle'
 import { go, type PublicRoute } from './routes'
 
 const YEAR = new Date().getFullYear()
 
 function scrollTo(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-type IconName = 'building' | 'file' | 'wallet' | 'camera' | 'wrench' | 'users' | 'shield' | 'code' | 'check'
-
-const ICONS: Record<IconName, ReactNode> = {
-  building: <><path d="M4 21V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v16" /><path d="M14 9h5a1 1 0 0 1 1 1v11" /><path d="M8 8h2M8 12h2M8 16h2M3 21h18" /></>,
-  file: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></>,
-  wallet: <><path d="M3 7a2 2 0 0 1 2-2h13v4" /><path d="M3 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z" /><circle cx="16" cy="14" r="1" /></>,
-  camera: <><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></>,
-  wrench: <><path d="M14.7 6.3a4 4 0 0 0-5 5L3 18l3 3 6.7-6.7a4 4 0 0 0 5-5l-2.4 2.4-2.6-.6-.6-2.6z" /></>,
-  users: <><circle cx="9" cy="8" r="3" /><path d="M3 20a6 6 0 0 1 12 0" /><circle cx="17" cy="9" r="2.5" /><path d="M17 14a5 5 0 0 1 4 5" /></>,
-  shield: <><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z" /><path d="M9 12l2 2 4-4" /></>,
-  code: <><path d="M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></>,
-  check: <path d="M5 12l4 4 10-10" />,
-}
-
-function Icon({ name }: { name: IconName }) {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {ICONS[name]}
-    </svg>
-  )
 }
 
 /** Cabeçalho e rodapé das páginas públicas (home e documentação da API). */
@@ -54,6 +34,7 @@ export function PublicLayout({ children, route }: { children: ReactNode; route: 
           <button className={route === 'api' ? 'active' : ''} onClick={() => go('api')}>API</button>
         </nav>
         <div className="pub-actions">
+          <ThemeToggle />
           <button onClick={() => go('login')}>Entrar</button>
           <button className="primary" onClick={() => go('register')}>Começar agora</button>
         </div>

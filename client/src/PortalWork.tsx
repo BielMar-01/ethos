@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { PortalLease } from './api'
+import { comm, type Announcement } from './commApi'
 import { work, type ClientInspection, type InspDetail, type MaintFull, type MaintItem, type TimelineUpdate } from './workApi'
 import { CATEGORY, INSP_TYPE, MAINT_STATUS, PRIORITY, SIGN_NOTE } from './labels'
 import { brl, date, dateTime } from './format'
@@ -7,6 +8,44 @@ import PhotoStrip from './PhotoStrip'
 import { ReadOnlyChecklist, ReportPaper, Signatures } from './InspectionView'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
+
+// ------------------------------------------------------------------- Comunicados
+
+/** Comunicados publicados que se aplicam ao cliente (pelo papel e pelo imóvel). */
+export function ClientAnnouncements() {
+  const [items, setItems] = useState<Announcement[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    comm
+      .clientAnnouncements()
+      .then((r) => setItems(r.items))
+      .catch((e) => setError(message(e)))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <p className="muted">Carregando…</p>
+  return (
+    <>
+      {error && <p className="error" role="alert">{error}</p>}
+      {items.length === 0 ? (
+        <p className="empty">Nenhum comunicado por enquanto.</p>
+      ) : (
+        items.map((a) => (
+          <article key={a.id} className="panel ann">
+            <div className="meta">
+              <span>{a.published_at ? dateTime(a.published_at) : ''}</span>
+              {a.property_name && <span className="badge badge-rascunho">{a.property_name}</span>}
+            </div>
+            <h3>{a.title}</h3>
+            <p>{a.body}</p>
+          </article>
+        ))
+      )}
+    </>
+  )
+}
 
 // -------------------------------------------------------- Manutenção (inquilino)
 

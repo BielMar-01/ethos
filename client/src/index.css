@@ -1,27 +1,73 @@
-/* Tokens PROVISÓRIOS — substituir pela paleta oficial quando os arquivos de branding forem adicionados. */
+/* Fontes locais (sem CDN): Inter para interface e números; Fraunces para títulos e marca. */
+@import '@fontsource-variable/inter/index.css';
+@import '@fontsource-variable/fraunces/index.css';
+
+/*
+ * Tokens de design. Tema ESCURO por padrão; o claro vem de [data-theme='light'] ou, sem escolha do
+ * usuário, da preferência do sistema. Cores PROVISÓRIAS: trocar pela paleta oficial quando houver.
+ * Pares de cor validados para contraste >= 4.5:1 (texto sobre o fundo correspondente).
+ */
 :root {
+  --font-ui: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
+
   --bg: #0d0d0f;
-  --surface: #17171a;
-  --border: #2a2a2f;
-  --text: #ececee;
-  --muted: #9a9aa3;
+  --surface: #16161a;
+  --surface-2: #1d1d22;
+  --border: #2a2a31;
+  --text: #ececef;
+  --muted: #9c9ca6;
   --accent: #c9a24a;
-  --accent-text: #15120a;
+  --accent-text: #17130a;
+  --ok: #3fb27f;
+  --info: #5b9bd5;
+  --warn: #d9a441;
   --danger: #e5534b;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.5);
+  --shadow-pop: 0 12px 40px -8px rgb(0 0 0 / 0.65);
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
   color-scheme: dark;
 }
 
-/* Escuro é o padrão; o tema claro segue a preferência do sistema. */
+:root[data-theme='light'] {
+  --bg: #f6f5f1;
+  --surface: #ffffff;
+  --surface-2: #faf9f6;
+  --border: #e2dfd6;
+  --text: #1a1a1d;
+  --muted: #62626b;
+  --accent: #8c6a17;
+  --accent-text: #ffffff;
+  --ok: #1e7b53;
+  --info: #1f66a8;
+  --warn: #8a5a00;
+  --danger: #b3261e;
+  --shadow: 0 1px 2px rgb(30 25 10 / 0.06), 0 8px 24px -14px rgb(30 25 10 / 0.18);
+  --shadow-pop: 0 12px 40px -8px rgb(30 25 10 / 0.28);
+  color-scheme: light;
+}
+
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme='dark']) {
+  :root:not([data-theme]) {
     --bg: #f6f5f1;
     --surface: #ffffff;
-    --border: #dedbd2;
-    --text: #1b1b1d;
-    --muted: #6b6b73;
-    --accent: #a8801f;
+    --surface-2: #faf9f6;
+    --border: #e2dfd6;
+    --text: #1a1a1d;
+    --muted: #62626b;
+    --accent: #8c6a17;
     --accent-text: #ffffff;
-    --danger: #c62828;
+    --ok: #1e7b53;
+    --info: #1f66a8;
+    --warn: #8a5a00;
+    --danger: #b3261e;
+    --shadow: 0 1px 2px rgb(30 25 10 / 0.06), 0 8px 24px -14px rgb(30 25 10 / 0.18);
+    --shadow-pop: 0 12px 40px -8px rgb(30 25 10 / 0.28);
     color-scheme: light;
   }
 }
@@ -30,14 +76,97 @@
   box-sizing: border-box;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.5;
+  font-family: var(--font-ui);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  font-feature-settings: 'cv11', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
+}
+
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+h3,
+h4 {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.3;
+}
+
+h2 {
+  font-size: clamp(1.35rem, 1.1rem + 1vw, 1.75rem);
+}
+
+h3 {
+  font-size: 1.05rem;
+}
+
+p {
+  margin-block: 0.5rem;
+}
+
+a {
+  color: var(--accent);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, 'JetBrains Mono', Consolas, monospace;
+  font-size: 0.86em;
+}
+
+/* Números alinhados em tabelas, cartões e valores. */
+table,
+.stat strong,
+.mock,
+dd {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  :root {
+    color-scheme: light;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
 }

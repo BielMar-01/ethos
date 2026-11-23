@@ -612,13 +612,9 @@ financeRouter.post("/transfers/:id/pay", requireRole("admin"), async (req, res) 
 
 // ----------------------------------------------------- Resumo e configurações
 
-financeRouter.get("/finance/summary", async (req, res) => {
-  const range = monthRange(req.query.month);
-  if (!range) {
-    res.status(400).json({ error: "month deve ser AAAA-MM" });
-    return;
-  }
-  const orgId = req.auth!.organization.id;
+/** Resumo financeiro do mês (AAAA-MM já validado): previsto, recebido, em atraso e caixa. */
+export async function financeSummary(orgId: number, month: string) {
+  const range = monthRange(month)!;
   const [row] = await db.query<Record<string, string>>(
     `SELECT
        COALESCE(sum(x.amount_cents) FILTER (WHERE x.due_date >= $2 AND x.due_date < $3), 0)::text AS expected,
@@ -636,15 +632,23 @@ financeRouter.get("/finance/summary", async (req, res) => {
   );
   const expected = Number(row!.expected);
   const received = Number(row!.received);
-  res.json({
-    month: req.query.month,
+  return {
+    month,
     expected_cents: expected,
     received_cents: received,
     received_ratio: expected > 0 ? Math.round((received / expected) * 1000) / 10 : null,
     overdue_cents: Number(row!.overdue),
     overdue_count: Number(row!.overdue_count),
     cash_received_cents: Number(cash!.n),
-  });
+  };
+}
+
+financeRouter.get("/finance/summary", async (req, res) => {
+  if (!monthRange(req.query.month)) {
+    res.status(400).json({ error: "month deve ser AAAA-MM" });
+    return;
+  }
+  res.json(await financeSummary(req.auth!.organization.id, String(req.query.month)));
 });
 
 financeRouter.get("/settings/finance", async (req, res) => {

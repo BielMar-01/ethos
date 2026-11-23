@@ -1,19 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, type InviteInfo, type Session } from './api'
 import PasswordInput from './PasswordInput'
-import ResourcePage from './ResourcePage'
-import ApiPage from './ApiPage'
 import LandingPage, { PublicLayout } from './LandingPage'
+import ApiPage from './ApiPage'
+import Shell from './Shell'
 import { go, routeFromHash, type PublicRoute } from './routes'
-import FinancePage from './FinancePage'
-import InspectionsPage from './InspectionsPage'
-import MaintenancePage from './MaintenancePage'
-import LeasesPage from './LeasesPage'
-import PortalPage from './PortalPage'
-import TeamPage from './TeamPage'
-import TemplatesPage from './TemplatesPage'
-import { RESOURCES } from './resources'
 import './App.css'
+import './layout.css'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -249,127 +242,6 @@ function AcceptInvite({ token, onAuth, onCancel }: { token: string; onAuth: (s: 
         Aceitar convite
       </button>
     </Page>
-  )
-}
-
-const STAFF = ['admin', 'colaborador']
-const TEAM = 'team'
-const LEASES = 'leases'
-const FINANCE = 'finance'
-const API = 'api'
-const MAINT = 'maintenance'
-const INSPECT = 'inspections'
-const TEMPLATES = 'templates'
-
-function Shell({ session, onLogout, onSession }: { session: Session; onLogout: () => void; onSession: (s: Session) => void }) {
-  const [current, setCurrent] = useState<string>(RESOURCES[0].key)
-  const [orgs, setOrgs] = useState<{ id: number; name: string }[]>([])
-  const isStaff = STAFF.includes(session.role)
-  const isAdmin = session.role === 'admin'
-  const isClient = session.role === 'inquilino' || session.role === 'proprietario'
-  const def = RESOURCES.find((r) => r.key === current)
-
-  useEffect(() => {
-    api.organizations().then((r) => setOrgs(r.organizations)).catch(() => setOrgs([]))
-  }, [session.organization.id])
-
-  async function switchOrg(id: number) {
-    await api.switchOrganization(id)
-    const me = await api.me()
-    if ('role' in me) {
-      setCurrent(RESOURCES[0].key)
-      onSession(me)
-    }
-  }
-
-  return (
-    <div className="shell">
-      <aside>
-        <div className="brand">Ethos</div>
-        <nav>
-          {isStaff &&
-            RESOURCES.map((r) => (
-              <button key={r.key} className={r.key === current ? 'nav active' : 'nav'} onClick={() => setCurrent(r.key)}>
-                {r.title}
-              </button>
-            ))}
-          {isStaff && (
-            <>
-              <button className={current === LEASES ? 'nav active' : 'nav'} onClick={() => setCurrent(LEASES)}>
-                Contratos
-              </button>
-              <button className={current === FINANCE ? 'nav active' : 'nav'} onClick={() => setCurrent(FINANCE)}>
-                Financeiro
-              </button>
-              <button className={current === MAINT ? 'nav active' : 'nav'} onClick={() => setCurrent(MAINT)}>
-                Manutenção
-              </button>
-              <button className={current === INSPECT ? 'nav active' : 'nav'} onClick={() => setCurrent(INSPECT)}>
-                Vistorias
-              </button>
-              <button className={current === TEMPLATES ? 'nav active' : 'nav'} onClick={() => setCurrent(TEMPLATES)}>
-                Modelos
-              </button>
-              <button className={current === API ? 'nav active' : 'nav'} onClick={() => setCurrent(API)}>
-                API
-              </button>
-            </>
-          )}
-          {isAdmin && (
-            <button className={current === TEAM ? 'nav active' : 'nav'} onClick={() => setCurrent(TEAM)}>
-              Equipe
-            </button>
-          )}
-        </nav>
-      </aside>
-      <div className="content">
-        <header>
-          {orgs.length > 1 ? (
-            <select
-              aria-label="Organização"
-              value={session.organization.id}
-              onChange={(e) => switchOrg(Number(e.target.value))}
-            >
-              {orgs.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span className="muted">{session.organization.name}</span>
-          )}
-          <span className="spacer" />
-          <span>
-            {session.user.name} · {session.role}
-          </span>
-          <button onClick={onLogout}>Sair</button>
-        </header>
-        <main>
-          {current === TEAM && isAdmin ? (
-            <TeamPage key={`team-${session.organization.id}`} currentUserId={session.user.id} />
-          ) : current === LEASES && isStaff ? (
-            <LeasesPage key={`leases-${session.organization.id}`} isAdmin={isAdmin} />
-          ) : current === FINANCE && isStaff ? (
-            <FinancePage key={`finance-${session.organization.id}`} isAdmin={isAdmin} />
-          ) : current === MAINT && isStaff ? (
-            <MaintenancePage key={`maint-${session.organization.id}`} isAdmin={isAdmin} currentUserId={session.user.id} />
-          ) : current === INSPECT && isStaff ? (
-            <InspectionsPage key={`insp-${session.organization.id}`} />
-          ) : current === TEMPLATES && isStaff ? (
-            <TemplatesPage key={`templates-${session.organization.id}`} canDelete={isAdmin} />
-          ) : current === API && isStaff ? (
-            <ApiPage key={`api-${session.organization.id}`} isAdmin={isAdmin} />
-          ) : isStaff && def ? (
-            <ResourcePage key={`${def.key}-${session.organization.id}`} def={def} canDelete={isAdmin} />
-          ) : isClient ? (
-            <PortalPage key={`portal-${session.organization.id}`} role={session.role} />
-          ) : (
-            <p className="empty">Seu perfil ({session.role}) ainda não tem telas disponíveis.</p>
-          )}
-        </main>
-      </div>
-    </div>
   )
 }
 

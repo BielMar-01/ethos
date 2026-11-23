@@ -15,6 +15,7 @@ import { inspectionsRouter } from "./inspections.js";
 import { photosRouter } from "./photos.js";
 import { announcementsRouter, clientAnnouncementsRouter, notificationsRouter } from "./notifications.js";
 import { remindersRouter } from "./reminders.js";
+import { dashboardRouter } from "./dashboard.js";
 import { apiKeysRouter } from "./apikeys.js";
 import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
@@ -268,6 +269,7 @@ export function createApp() {
   app.use("/api", announcementsRouter);
   app.use("/api", clientAnnouncementsRouter);
   app.use("/api", remindersRouter);
+  app.use("/api", dashboardRouter);
   app.use("/api", apiKeysRouter);
   app.get("/api/openapi.json", (req, res) => {
     res.json(buildOpenApi(`${req.protocol}://${req.get("host")}`));
