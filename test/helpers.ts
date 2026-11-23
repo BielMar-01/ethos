@@ -41,6 +41,27 @@ export class Client {
   }
 }
 
+/** Envia um corpo binário (foto) com o cookie da sessão. */
+export async function upload(c: Client, path: string, body: Buffer, contentType = "image/jpeg") {
+  const res = await fetch(c.base + path, {
+    method: "POST",
+    headers: { "Content-Type": contentType, ...(c.cookie ? { Cookie: c.cookie } : {}) },
+    body: new Uint8Array(body),
+  });
+  const text = await res.text();
+  return { status: res.status, body: text ? JSON.parse(text) : null };
+}
+
+/** Baixa um recurso binário (foto) com o cookie da sessão. */
+export async function download(c: Client, path: string) {
+  const res = await fetch(c.base + path, { headers: c.cookie ? { Cookie: c.cookie } : {} });
+  return { status: res.status, type: res.headers.get("content-type"), bytes: Buffer.from(await res.arrayBuffer()), headers: res.headers };
+}
+
+/** "Imagens" mínimas: só o cabeçalho que identifica o formato (o servidor valida pelo conteúdo). */
+export const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("fake-jpeg-body-1234567890")]);
+export const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("fake-png-body")]);
+
 export async function register(base: string, email: string, org: string): Promise<Client> {
   const c = new Client(base);
   const r = await c.call("POST", "/api/auth/register", {

@@ -30,7 +30,7 @@ async function main() {
   const s = await seedDemo(row.organization_id, row.user_id);
   console.log(
     `Criados: ${s.owners} proprietários, ${s.properties} imóveis, ${s.units} unidades, ${s.tenants} inquilinos, ` +
-      `${s.leases} contratos, ${s.charges} cobranças, ${s.payments} pagamentos, ${s.transfers} repasses.`,
+      `${s.leases} contratos, ${s.charges} cobranças, ${s.payments} pagamentos, ${s.transfers} repasses, ${s.maintenance} chamados e ${s.inspections} vistorias.`,
   );
   console.log("\nConvites para testar a área do cliente (use um e-mail seu ao aceitar, se preferir criar outro convite):");
   for (const i of s.invites) console.log(`  ${i.label}: ${i.link}`);

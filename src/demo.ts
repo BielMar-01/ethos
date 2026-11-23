@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 import type { AddressInfo } from "node:net";
 import { createApp } from "./app.js";
 import { db } from "./db.js";
@@ -23,7 +24,44 @@ export interface DemoSummary {
   charges: number;
   payments: number;
   transfers: number;
+  maintenance: number;
+  inspections: number;
   invites: { label: string; link: string }[];
+}
+
+/** PNG de demonstração (degradê) gerado na hora: não há arquivos de imagem no repositório. */
+function demoPng(variant: number, w = 240, h = 160): Buffer {
+  const rows: Buffer[] = [];
+  for (let y = 0; y < h; y++) {
+    const row = Buffer.alloc(1 + w * 3);
+    for (let x = 0; x < w; x++) {
+      const t = x / w;
+      const s = y / h;
+      row[1 + x * 3] = Math.round(70 + 120 * (variant === 0 ? t : s));
+      row[2 + x * 3] = Math.round(90 + 90 * (variant === 0 ? s : t));
+      row[3 + x * 3] = Math.round(110 + 60 * (1 - t));
+    }
+    rows.push(row);
+  }
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; // 8 bits por canal
+  ihdr[9] = 2; // RGB
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlib.deflateSync(Buffer.concat(rows))),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 
 const TEMPLATE = `[MODELO DE EXEMPLO — sem validade jurídica; substitua pelo texto aprovado]
@@ -63,6 +101,15 @@ export async function seedDemo(organizationId: number, userId: number): Promise<
     const json = text ? JSON.parse(text) : null;
     if (!res.ok) throw new Error(`${method} ${path} → ${res.status}: ${json?.error ?? text}`);
     return json;
+  };
+
+  const uploadPhoto = async (path: string, png: Buffer) => {
+    const res = await fetch(base + path, {
+      method: "POST",
+      headers: { "Content-Type": "image/png", Cookie: `${SESSION_COOKIE}=${sid}` },
+      body: new Uint8Array(png),
+    });
+    if (!res.ok) throw new Error(`foto ${path} → ${res.status}`);
   };
 
   try {
@@ -161,6 +208,43 @@ export async function seedDemo(organizationId: number, userId: number): Promise<
       await call("POST", `/api/transfers/${t.id}/pay`, {});
     }
 
+    // Manutenção: um chamado em execução (com fotos e orçamentos), um concluído e um recém-aberto.
+    const maint = async (unitId: number, title: string, category: string, priority: string, description: string) =>
+      (await call("POST", "/api/maintenance", { unit_id: unitId, title, category, priority, description })).id as number;
+    const setStatus = (id: number, status: string, extra: Record<string, unknown> = {}) => call("POST", `/api/maintenance/${id}/status`, { status, ...extra });
+
+    const leak = await maint(units[0]!, "Vazamento na pia da cozinha", "hidraulica", "alta", "A torneira pinga o tempo todo e o armário abaixo está úmido.");
+    await uploadPhoto(`/api/maintenance/${leak}/photos`, demoPng(0));
+    await setStatus(leak, "em_analise");
+    await call("POST", `/api/maintenance/${leak}/quotes`, { supplier: "Hidro Ltda (demo)", amount_cents: 45000 });
+    const cheaper = (await call("POST", `/api/maintenance/${leak}/quotes`, { supplier: "Encanador Zé (demo)", amount_cents: 38000, notes: "Inclui material" })).id as number;
+    await call("POST", `/api/maintenance/${leak}/quotes/${cheaper}/approve`);
+    await setStatus(leak, "em_execucao");
+    await call("POST", `/api/maintenance/${leak}/comments`, { message: "Encanador agendado para terça, 9h.", client_visible: true });
+
+    const bulb = await maint(units[1]!, "Troca de lâmpada do corredor", "eletrica", "baixa", "Lâmpada queimada no corredor de entrada.");
+    await setStatus(bulb, "em_analise");
+    await setStatus(bulb, "em_execucao");
+    await setStatus(bulb, "concluida", { cost_cents: 4500 });
+    await maint(units[3]!, "Infiltração no teto do quarto", "estrutural", "urgente", "Mancha escura crescendo perto da janela; pingou na última chuva.");
+
+    // Vistorias: uma de entrada concluída e assinada (com foto) e uma periódica agendada.
+    const entry = (await call("POST", "/api/inspections", { unit_id: units[0], type: "entrada", scheduled_for: `${startMonth}-01`, notes: "Imóvel entregue recém-pintado." })).id as number;
+    await call("POST", `/api/inspections/${entry}/status`, { status: "em_andamento" });
+    const entryItems = (await call("GET", `/api/inspections/${entry}`)).items as { id: number; room: string; item: string }[];
+    for (const [i, it] of entryItems.entries()) {
+      const worn = it.item === "Piso" && it.room === "Cozinha";
+      await call("PATCH", `/api/inspections/${entry}/items/${it.id}`, {
+        condition: worn ? "regular" : i % 7 === 0 ? "novo" : "bom",
+        notes: worn ? "Risco leve perto da pia." : null,
+      });
+    }
+    await uploadPhoto(`/api/inspections/${entry}/items/${entryItems.find((i) => i.room === "Cozinha" && i.item === "Piso")!.id}/photos`, demoPng(1));
+    await call("POST", `/api/inspections/${entry}/status`, { status: "concluida", performed_at: `${startMonth}-01` });
+    await call("POST", `/api/inspections/${entry}/signatures`, { role: "vistoriador", signer_name: "Ana Administradora" });
+    await call("POST", `/api/inspections/${entry}/signatures`, { role: "locatario", signer_name: "Carlos Almeida" });
+    await call("POST", "/api/inspections", { unit_id: units[1], type: "periodica", scheduled_for: `${addMonths(current, 1)}-10` });
+
     // Convites para experimentar a área do cliente.
     const invites: DemoSummary["invites"] = [];
     const tenantInvite = await call("POST", "/api/invitations", { email: "demo.inquilino@example.com", role: "inquilino", tenantId: tenants[0] });
@@ -168,7 +252,10 @@ export async function seedDemo(organizationId: number, userId: number): Promise<
     const ownerInvite = await call("POST", "/api/invitations", { email: "demo.proprietario@example.com", role: "proprietario", ownerId: maria });
     invites.push({ label: "Proprietário (Maria Souza)", link: ownerInvite.link });
 
-    return { owners: 2, properties: 2, units: units.length, tenants: tenants.length, leases: leases.length, charges, payments, transfers, invites };
+    return {
+      owners: 2, properties: 2, units: units.length, tenants: tenants.length, leases: leases.length, charges, payments, transfers,
+      maintenance: 3, inspections: 2, invites,
+    };
   } finally {
     server.close();
     await db.query("DELETE FROM sessions WHERE id = $1", [sid]);

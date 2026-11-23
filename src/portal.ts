@@ -41,8 +41,8 @@ portalRouter.get("/portal/me", requireRole("inquilino", "proprietario"), async (
 
 // ------------------------------------------------------------------ Inquilino
 
-const tenantGuard = [requireRole("inquilino"), tenantOnly];
-const MY_LEASES = "SELECT lease_id FROM lease_tenants WHERE tenant_id = $2";
+export const tenantGuard = [requireRole("inquilino"), tenantOnly];
+export const MY_LEASES = "SELECT lease_id FROM lease_tenants WHERE tenant_id = $2";
 
 portalRouter.get("/portal/tenant/leases", ...tenantGuard, async (req, res) => {
   const items = await db.query(
@@ -142,8 +142,8 @@ portalRouter.get("/portal/tenant/documents/:id", ...tenantGuard, async (req, res
 
 // --------------------------------------------------------------- Proprietário
 
-const ownerGuard = [requireRole("proprietario"), ownerOnly];
-const MY_PROPERTIES = "SELECT property_id FROM property_owners WHERE owner_id = $2";
+export const ownerGuard = [requireRole("proprietario"), ownerOnly];
+export const MY_PROPERTIES = "SELECT property_id FROM property_owners WHERE owner_id = $2";
 
 portalRouter.get("/portal/owner/properties", ...ownerGuard, async (req, res) => {
   const items = await db.query(

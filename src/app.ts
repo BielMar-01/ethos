@@ -9,6 +9,10 @@ import { RateLimiter } from "./ratelimit.js";
 import { teamRouter } from "./team.js";
 import { contractsRouter } from "./contracts.js";
 import { portalRouter } from "./portal.js";
+import { portalExtraRouter } from "./portalExtra.js";
+import { maintenanceRouter } from "./maintenance.js";
+import { inspectionsRouter } from "./inspections.js";
+import { photosRouter } from "./photos.js";
 import { apiKeysRouter } from "./apikeys.js";
 import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
@@ -251,7 +255,11 @@ export function createApp() {
   app.use("/api", financeRouter);
 
   // ---------- Área do cliente, chaves de API e documentação ----------
+  app.use("/api", maintenanceRouter);
+  app.use("/api", inspectionsRouter);
+  app.use("/api", photosRouter);
   app.use("/api", portalRouter);
+  app.use("/api", portalExtraRouter);
   app.use("/api", apiKeysRouter);
   app.get("/api/openapi.json", (req, res) => {
     res.json(buildOpenApi(`${req.protocol}://${req.get("host")}`));
@@ -359,6 +367,10 @@ export function createApp() {
   }
 
   const onError: ErrorRequestHandler = (err, _req, res, _next) => {
+    if (err?.type === "entity.too.large") {
+      res.status(413).json({ error: "Arquivo ou corpo grande demais (fotos: até 3 MB)" });
+      return;
+    }
     if (err?.type === "entity.parse.failed") {
       res.status(400).json({ error: "JSON inválido" });
       return;
