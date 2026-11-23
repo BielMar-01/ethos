@@ -29,6 +29,14 @@ npm run build && npm run demo   # http://localhost:3100, tudo em memória, dados
 ```
 Logins de demonstração (senha `demo-1234-senha`): `admin@demo.test`, `demo.inquilino@example.com`, `demo.proprietario@example.com`.
 
+## Testes de ponta a ponta (Playwright)
+```bash
+npx playwright install chromium   # uma vez
+npm run test:e2e                  # build + 54 testes em navegador (desktop e celular) sobre o modo demo
+npm run test:e2e:run              # sem rebuild
+npx playwright show-report        # relatório da última execução
+```
+
 ## Publicar
 Vercel: veja [`docs/DEPLOY-VERCEL.md`](docs/DEPLOY-VERCEL.md).
 

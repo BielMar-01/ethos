@@ -6,6 +6,8 @@ export interface FieldDef {
   options?: { value: string; label: string }[]
   /** Para type 'ref': recurso cujos itens preenchem o select. */
   ref?: string
+  /** Campo de CEP: aplica máscara e preenche rua, bairro, cidade e UF ao completar 8 números. */
+  cep?: boolean
   /** Exibir na tabela. */
   column?: boolean
 }
@@ -47,12 +49,13 @@ export const RESOURCES: ResourceDef[] = [
           { value: 'outro', label: 'Outro' },
         ],
       },
+      { name: 'zip', label: 'CEP', cep: true },
       { name: 'street', label: 'Rua' },
       { name: 'number', label: 'Número' },
+      { name: 'complement', label: 'Complemento' },
       { name: 'neighborhood', label: 'Bairro' },
       { name: 'city', label: 'Cidade', column: true },
       { name: 'state', label: 'UF' },
-      { name: 'zip', label: 'CEP' },
     ],
   },
   {

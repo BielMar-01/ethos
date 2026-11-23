@@ -289,5 +289,5 @@ button.big { padding: 0.8rem 1.4rem; font-size: 1rem; }
   .pub-header { justify-content: space-between; }
   .pub-footer { grid-template-columns: 1fr; }
 }
-@media (max-width: 480px) { .pub-actions button:not(.primary) { display: none; } .mock-cards { grid-template-columns: 1fr; } }
+@media (max-width: 480px) { .pub-actions > button:not(.primary):not(.icon-btn) { display: none; } .mock-cards { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }

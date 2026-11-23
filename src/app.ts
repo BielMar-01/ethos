@@ -20,6 +20,8 @@ import { apiKeysRouter } from "./apikeys.js";
 import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
 import { importRouter } from "./importer.js";
+import { cepRouter } from "./cep.js";
+import { extractRouter } from "./extract.js";
 import { auditMiddleware, auditRouter, recordAudit, requestInfo } from "./audit.js";
 
 const MIN_PASSWORD = 8;
@@ -310,6 +312,8 @@ export function createApp() {
   app.use("/api", dashboardRouter);
   app.use("/api", auditRouter);
   app.use("/api", importRouter);
+  app.use("/api", cepRouter);
+  app.use("/api", extractRouter);
   app.use("/api", apiKeysRouter);
   app.get("/api/openapi.json", (req, res) => {
     res.json(buildOpenApi(`${req.protocol}://${req.get("host")}`));

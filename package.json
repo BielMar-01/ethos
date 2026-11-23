@@ -13,19 +13,23 @@
     "db:migrate": "tsx src/migrate.ts",
     "user:reset-password": "tsx src/cli/resetPassword.ts",
     "seed:demo": "tsx src/cli/seedDemo.ts",
-    "demo": "tsx src/cli/demoServer.ts"
+    "demo": "tsx src/cli/demoServer.ts",
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:run": "playwright test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.12.0",
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
     "pg": "^8.23.1"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.6.0",
+    "@playwright/test": "^1.65.1",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",

@@ -329,8 +329,8 @@
   animation: chip-bob 5s ease-in-out infinite;
 }
 .chip-b {
-  bottom: 38px;
-  left: -26px;
+  bottom: -16px;
+  left: 28px;
   color: var(--info);
   animation: chip-bob 6s 1s ease-in-out infinite reverse;
 }
@@ -341,7 +341,7 @@
 }
 @media (max-width: 600px) {
   .chip-b {
-    left: -8px;
+    left: 12px;
   }
 }
 

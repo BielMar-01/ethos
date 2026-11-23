@@ -21,6 +21,9 @@
 - ✅ **Vistorias**: checklist por ambiente, fotos, conclusão só com tudo avaliado, laudo, registro de ciência, comparação entrada × saída, imutável depois de concluída.
 - ✅ **Comunicados e notificações**: comunicados por público (todos, inquilinos, proprietários, imóvel); notificações internas por eventos; **lembretes automáticos** (vencimento próximo, atraso, fim de contrato); preferências por categoria.
 - ✅ **Registros de atividade (auditoria)**: toda escrita e toda negação de permissão, login e login falho; só o admin vê; filtros, paginação e CSV; imutável.
+- ✅ **CEP**: máscara e preenchimento automático do endereço (ViaCEP → BrasilAPI, via servidor).
+- 🟡 **Cadastro por documento (IA)**: foto/PDF de RG, CNH, contrato, matrícula, IPTU → sugestões de proprietário, inquilino, imóvel, unidade e **rascunho** de contrato, com revisão antes de gravar. **Só liga com `ANTHROPIC_API_KEY`; nunca testado com a API real** (os testes usam cliente falso). Qualidade de leitura depende do documento: sempre conferir.
+- ✅ **Testes E2E em navegador (Playwright)**: 54 testes (desktop e celular) sobre o demo; rodam no CI.
 - ✅ **Redefinição de senha pelo admin** (e-mail, link ou senha definida na hora/temporária), com sessões encerradas e auditoria.
 - ✅ **Importação em massa** por CSV (proprietários, inquilinos, imóveis, unidades — vários arquivos de uma vez), com simulação, tudo-ou-nada, linha do erro e sem duplicar. 🟡 tela nunca vista em navegador.
 - 🟡 **Áreas públicas** com animações, transições e login em tela dividida (nunca vistas em navegador).
@@ -40,7 +43,7 @@
 
 ### Prioridade alta (antes de colocar clientes reais)
 1. ⬜ **Ver tudo em navegador e em celular de verdade.** Nenhuma tela foi aberta em navegador nesta sessão (só build, lint e renderização no servidor). Esperar ajustes visuais.
-2. ⬜ **Testes de interface** (Playwright) dos fluxos críticos e teste de acessibilidade.
+2. 🟡 **Testes de interface**: Playwright cobre os fluxos principais; faltam contratos (criar/ativar/emitir documento), recebimento e estorno, manutenção, vistorias e **acessibilidade automatizada** (axe), além de testar contra a API real da Anthropic.
 3. ⬜ **Testar o e-mail de recuperação de senha e o link do admin** contra o Supabase real; cadastrar `APP_URL` nas *Redirect URLs*; configurar **SMTP próprio** (o padrão do Supabase tem limite baixo).
 4. ⬜ **Trocar os segredos expostos na conversa** (senha do banco, `SUPABASE_SECRET_KEY`, senha temporária do admin).
 5. 🟡 **Deploy na Vercel preparado** (`docs/DEPLOY-VERCEL.md`): falta criar o projeto, definir variáveis, domínio, SMTP e backup do banco; CI (testes a cada push) ainda não existe.
