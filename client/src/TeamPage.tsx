@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, ROLE_LABELS, type Invitation, type Item, type Member, type Role } from './api'
 import { Alert, Toast, Loading, ask, toast } from './feedback'
+import Modal from './Modal'
 import PasswordInput from './PasswordInput'
 
 const ROLES = Object.keys(ROLE_LABELS) as Role[]
@@ -15,6 +16,8 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
   const [notice, setNotice] = useState('')
   const [link, setLink] = useState<{ label: string; url: string } | null>(null)
   const [resetting, setResetting] = useState<Member | null>(null)
+  const [inviting, setInviting] = useState(false)
+  const [viewing, setViewing] = useState<Member | null>(null)
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('colaborador')
   const [tenants, setTenants] = useState<Item[]>([])
@@ -58,6 +61,7 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
       setLink({ label: `Convite para ${r.invitation.email}`, url: r.link })
       setEmail('')
       setLinkId('')
+      setInviting(false)
       await load()
     })
   }
@@ -107,14 +111,15 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
     <section>
       <div className="page-head">
         <h2>Equipe</h2>
+        <button className="primary" onClick={() => setInviting(true)}>Convidar pessoa</button>
       </div>
 
       {error && <Alert>{error}</Alert>}
       {notice && <Toast>{notice}</Toast>}
 
       {link && (
-        <div className="panel link-box">
-          <strong>{link.label}</strong>
+        <Modal title={link.label} size="sm" onClose={() => setLink(null)}>
+        <div className="link-box">
           <p className="muted">
             Quem tiver este link acessa a conta/convite. Envie apenas à pessoa certa — ele não será exibido de novo.
           </p>
@@ -126,10 +131,12 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
             </button>
           </div>
         </div>
+        </Modal>
       )}
 
-      <form className="panel form-grid" onSubmit={invite}>
-        <h3>Convidar pessoa</h3>
+      {inviting && (
+      <Modal title="Convidar pessoa" onClose={() => setInviting(false)}>
+      <form className="form-grid" onSubmit={invite}>
         <label>
           E-mail
           <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -174,6 +181,8 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
           </button>
         </div>
       </form>
+      </Modal>
+      )}
 
       {loading ? (
         <Loading label="Carregando…" />
@@ -217,6 +226,7 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
                       )}
                     </td>
                     <td className="row-actions">
+                      <button onClick={() => setViewing(m)}>Ver</button>
                       <button onClick={() => setResetting(m)}>Redefinir senha</button>
                       {m.id !== currentUserId && (
                         <button className="danger" onClick={() => remove(m)}>
@@ -263,6 +273,36 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
           )}
         </>
       )}
+      {viewing && (
+        <Modal
+          title={viewing.name}
+          subtitle={ROLE_LABELS[viewing.role]}
+          size="sm"
+          onClose={() => setViewing(null)}
+          footer={
+            <>
+              <button onClick={() => setViewing(null)}>Fechar</button>
+              <button
+                className="primary"
+                onClick={() => {
+                  const m = viewing
+                  setViewing(null)
+                  setResetting(m)
+                }}
+              >
+                Redefinir senha
+              </button>
+            </>
+          }
+        >
+          <dl className="view-grid">
+            <div className="wide"><dt>E-mail</dt><dd>{viewing.email}</dd></div>
+            <div><dt>Papel</dt><dd>{ROLE_LABELS[viewing.role]}</dd></div>
+            <div><dt>Vínculo</dt><dd>{viewing.linked_name ?? '—'}</dd></div>
+          </dl>
+        </Modal>
+      )}
+
       {resetting && (
         <ResetPasswordDialog
           member={resetting}
@@ -290,12 +330,6 @@ function ResetPasswordDialog({ member, onClose, onEmail, onLink }: { member: Mem
   const [error, setError] = useState('')
   const [created, setCreated] = useState<string | null>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   async function setNow(e: FormEvent) {
     e.preventDefault()
     setError('')
@@ -316,9 +350,8 @@ function ResetPasswordDialog({ member, onClose, onEmail, onLink }: { member: Mem
   }
 
   return (
-    <div className="dialog-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog wide" role="dialog" aria-modal="true" aria-labelledby="rp-title">
-        <h3 id="rp-title">Redefinir senha de {member.name}</h3>
+    <Modal title={`Redefinir senha de ${member.name}`} size="sm" onClose={onClose}>
+      <div>
         {created ? (
           <>
             <p>Senha temporária criada. <strong>Ela só aparece agora</strong>: passe para {member.name} por um canal seguro e peça que a troque.</p>
@@ -337,7 +370,7 @@ function ResetPasswordDialog({ member, onClose, onEmail, onLink }: { member: Mem
                 Copiar
               </button>
             </div>
-            <div className="dialog-actions"><button className="primary" onClick={onClose}>Concluir</button></div>
+            <div className="modal-actions"><button className="primary" onClick={onClose}>Concluir</button></div>
           </>
         ) : (
           <>
@@ -353,10 +386,10 @@ function ResetPasswordDialog({ member, onClose, onEmail, onLink }: { member: Mem
               <button onClick={onEmail}>Enviar link por e-mail</button>
               <button onClick={onLink}>Gerar link para copiar</button>
             </div>
-            <div className="dialog-actions"><button onClick={onClose}>Cancelar</button></div>
+            <div className="modal-actions"><button onClick={onClose}>Cancelar</button></div>
           </>
         )}
       </div>
-    </div>
+    </Modal>
   )
 }

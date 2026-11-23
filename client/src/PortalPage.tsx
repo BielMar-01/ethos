@@ -15,6 +15,7 @@ import {
 import { brl, date, dateTime } from './format'
 import { ClientAnnouncements, ClientInspections, OwnerMaintenance, TenantMaintenance } from './PortalWork'
 import { Alert, Loading } from './feedback'
+import Modal from './Modal'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -116,7 +117,8 @@ function TenantArea({ initialTab }: { initialTab?: string }) {
       {error && <Alert className="no-print">{error}</Alert>}
 
       {paper && (
-        <div className="panel print-area">
+        <Modal size="md" onClose={() => setPaper(null)}>
+        <div className="print-area">
           <div className="paper-head no-print">
             <strong>{paper.title}</strong>
             <div className="actions">
@@ -126,6 +128,7 @@ function TenantArea({ initialTab }: { initialTab?: string }) {
           </div>
           <article className="paper">{paper.content}</article>
         </div>
+        </Modal>
       )}
 
       <div className="cards no-print">

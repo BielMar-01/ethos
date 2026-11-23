@@ -62,8 +62,9 @@ test.describe("equipe: redefinir senha pela tela", () => {
     await openPanel(page);
     await menu(page).getByRole("button", { name: "Equipe", exact: true }).click();
     const email = `conv-${Date.now().toString(36)}@e2e.test`;
-    await page.getByLabel("E-mail").first().fill(email);
-    await page.getByRole("button", { name: /Convidar|Gerar convite|Criar convite/ }).first().click();
+    await page.getByRole("button", { name: "Convidar pessoa" }).click();
+    await page.getByRole("dialog").getByLabel("E-mail").fill(email);
+    await page.getByRole("dialog").getByRole("button", { name: "Gerar convite" }).click();
     const link = await page.locator("input[readonly], .link-box code, .link-box input").first().inputValue().catch(async () => (await page.locator(".link-box").innerText()));
     expect(link).toContain("invite=");
     const ctx = await browser.newContext();

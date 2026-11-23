@@ -6,6 +6,7 @@ import { detectImage } from "./photos.js";
 import { parseMoney } from "./importer.js";
 import { RateLimiter } from "./ratelimit.js";
 import { recordAudit, requestInfo } from "./audit.js";
+import { orgAnthropic } from "./integrations.js";
 
 /**
  * Leitura automática de documentos (foto/PDF de RG, CNH, comprovante, contrato, matrícula, IPTU…) para pré-preencher
@@ -171,14 +172,26 @@ export function sanitize(raw: unknown): Extraction {
 // ---------------------------------------------------------------------------------------------- chamada ao modelo
 
 export type MessagesClient = Pick<Anthropic, "beta">;
-let clientFactory: () => MessagesClient = () => new Anthropic();
+let clientFactory: (apiKey?: string) => MessagesClient = (apiKey) => (apiKey ? new Anthropic({ apiKey }) : new Anthropic());
 
 /** Só para testes: troca o cliente da Anthropic por um falso. */
-export function setExtractClientFactory(factory: (() => MessagesClient) | null) {
-  clientFactory = factory ?? (() => new Anthropic());
+export function setExtractClientFactory(factory: ((apiKey?: string) => MessagesClient) | null) {
+  clientFactory = factory ?? ((apiKey) => (apiKey ? new Anthropic({ apiKey }) : new Anthropic()));
 }
 
-export const extractEnabled = () => Boolean(process.env.ANTHROPIC_API_KEY);
+export interface ExtractConfig {
+  apiKey?: string; // sem valor = o SDK usa ANTHROPIC_API_KEY do servidor
+  model: string;
+  source: "organization" | "server";
+}
+
+/** Quem paga a leitura: a chave da própria organização (Integrações) ou, na falta dela, a do servidor. `null` = desligado. */
+export async function resolveExtractConfig(orgId: number): Promise<ExtractConfig | null> {
+  const own = await orgAnthropic(orgId);
+  if (own) return { apiKey: own.apiKey, model: own.model || process.env.EXTRACT_MODEL || DEFAULT_MODEL, source: "organization" };
+  if (process.env.ANTHROPIC_API_KEY) return { model: process.env.EXTRACT_MODEL || DEFAULT_MODEL, source: "server" };
+  return null;
+}
 
 export class ExtractError extends Error {
   constructor(message: string, public status: number) {
@@ -188,7 +201,7 @@ export class ExtractError extends Error {
 
 type Media = "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
 
-export async function extractFromFile(data: Buffer, media: Media): Promise<Extraction> {
+export async function extractFromFile(data: Buffer, media: Media, config: ExtractConfig): Promise<Extraction> {
   const b64 = data.toString("base64");
   const source =
     media === "application/pdf"
@@ -196,8 +209,8 @@ export async function extractFromFile(data: Buffer, media: Media): Promise<Extra
       : ({ type: "image", source: { type: "base64", media_type: media, data: b64 } } as const);
   let res;
   try {
-    res = await clientFactory().beta.messages.create({
-      model: process.env.EXTRACT_MODEL || DEFAULT_MODEL,
+    res = await clientFactory(config.apiKey).beta.messages.create({
+      model: config.model,
       max_tokens: 4000,
       // Se um classificador de segurança recusar, o servidor tenta o modelo de reserva na mesma chamada.
       betas: ["server-side-fallback-2026-07-01"],
@@ -238,13 +251,15 @@ const rawFile = express.raw({ type: ["image/jpeg", "image/png", "image/webp", "a
 
 export const extractRouter = Router();
 
-extractRouter.get("/extract/status", requireAuth, requireRole("admin", "colaborador"), (_req, res) => {
-  res.json({ enabled: extractEnabled(), max_bytes: MAX_BYTES });
+extractRouter.get("/extract/status", requireAuth, requireRole("admin", "colaborador"), async (req, res) => {
+  const cfg = await resolveExtractConfig(req.auth!.organization.id);
+  res.json({ enabled: Boolean(cfg), source: cfg?.source ?? null, max_bytes: MAX_BYTES });
 });
 
 extractRouter.post("/extract", rawFile, requireAuth, requireRole("admin", "colaborador"), async (req, res) => {
-  if (!extractEnabled()) {
-    res.status(503).json({ error: "A leitura automática de documentos não está ativada neste sistema. Peça ao administrador para configurar." });
+  const config = await resolveExtractConfig(req.auth!.organization.id);
+  if (!config) {
+    res.status(503).json({ error: "A leitura automática de documentos não está ativada neste sistema. Peça ao administrador para configurar em Integrações." });
     return;
   }
   const body = req.body;
@@ -265,7 +280,7 @@ extractRouter.post("/extract", rawFile, requireAuth, requireRole("admin", "colab
     return;
   }
   try {
-    const result = await extractFromFile(body, media);
+    const result = await extractFromFile(body, media, config);
     // Auditoria SEM o conteúdo extraído (dados pessoais): só tipo e tamanho.
     await recordAudit({
       organizationId: req.auth!.organization.id,
@@ -277,7 +292,7 @@ extractRouter.post("/extract", rawFile, requireAuth, requireRole("admin", "colab
       entity: "extract",
       summary: "Enviou documento para leitura automática",
       status: 200,
-      metadata: { type: result.kind, bytes: body.length, media },
+      metadata: { type: result.kind, bytes: body.length, media, source: config.source },
       ...requestInfo(req),
     });
     res.json(result);

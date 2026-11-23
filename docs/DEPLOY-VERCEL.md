@@ -17,6 +17,7 @@
    | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` | do painel do Supabase |
    | `APP_URL` | `https://seu-dominio` (sem barra no fim) |
    | `CRON_SECRET` | texto longo e aleatório (ex.: `openssl rand -hex 32`) |
+   | `INTEGRATIONS_SECRET` | texto aleatório de 32+ caracteres (`openssl rand -base64 48`). Cifra as chaves de integrações. **Guarde uma cópia: se perder ou trocar, as chaves salvas ficam ilegíveis e precisam ser cadastradas de novo.** |
    | `ANTHROPIC_API_KEY` | (opcional) liga a leitura automática de documentos; sem ela a tela avisa que está desligada. Cada leitura é cobrada pela Anthropic. |
 4. Supabase → *Authentication → URL Configuration*: **Site URL** = `APP_URL` e adicione-a em **Redirect URLs**. Configure também um **SMTP próprio** (o padrão tem limite baixo).
 5. Faça o deploy. Confira: `https://…/api/health` → `{"status":"ok"}`; abra o app, cadastre/entre e teste "Esqueci minha senha".

@@ -7,6 +7,7 @@ import { brl, date, dateTime } from './format'
 import PhotoStrip from './PhotoStrip'
 import { ReadOnlyChecklist, ReportPaper, Signatures } from './InspectionView'
 import { Alert, Loading, toast } from './feedback'
+import Modal from './Modal'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -68,7 +69,6 @@ export function TenantMaintenance({ leases }: { leases: PortalLease[] }) {
     load()
   }, [load])
 
-  if (openId !== null) return <TenantRequest id={openId} onBack={() => { setOpenId(null); load() }} />
   const active = leases.filter((l) => l.status === 'vigente')
 
   return (
@@ -79,7 +79,16 @@ export function TenantMaintenance({ leases }: { leases: PortalLease[] }) {
         <button className="primary" disabled={active.length === 0} onClick={() => setCreating(true)}>Nova solicitação</button>
       </div>
       {active.length === 0 && <p className="muted small">Você precisa de um contrato vigente para abrir solicitações.</p>}
-      {creating && <NewTenantRequest leases={active} onCancel={() => setCreating(false)} onDone={(id) => { setCreating(false); setOpenId(id) }} />}
+      {creating && (
+        <Modal title="Nova solicitação de manutenção" onClose={() => setCreating(false)}>
+          <NewTenantRequest leases={active} onCancel={() => setCreating(false)} onDone={(id) => { setCreating(false); setOpenId(id) }} />
+        </Modal>
+      )}
+      {openId !== null && (
+        <Modal size="lg" onClose={() => { setOpenId(null); load() }}>
+          <TenantRequest id={openId} onBack={() => { setOpenId(null); load() }} />
+        </Modal>
+      )}
       {items.length === 0 ? (
         <p className="empty">Nenhuma solicitação aberta. Precisa de um reparo? Abra uma solicitação.</p>
       ) : (
@@ -93,7 +102,7 @@ export function TenantMaintenance({ leases }: { leases: PortalLease[] }) {
                   <td>{CATEGORY[m.category]}</td>
                   <td><span className={`badge badge-m-${m.status}`}>{MAINT_STATUS[m.status]}</span></td>
                   <td>{dateTime(m.updated_at)}</td>
-                  <td className="row-actions"><button onClick={() => setOpenId(m.id)}>Acompanhar</button></td>
+                  <td className="row-actions" onClick={(e) => e.stopPropagation()}><button onClick={() => setOpenId(m.id)}>Acompanhar</button></td>
                 </tr>
               ))}
             </tbody>
@@ -188,7 +197,7 @@ function TenantRequest({ id, onBack }: { id: number; onBack: () => void }) {
   return (
     <>
       <div className="page-head">
-        <button onClick={onBack}>← Solicitações</button>
+        <button className="back-btn" onClick={onBack}>← Solicitações</button>
         <h3 style={{ margin: 0 }}>{item.title}</h3>
         <span className={`badge badge-m-${item.status}`}>{MAINT_STATUS[item.status]}</span>
       </div>
@@ -289,7 +298,6 @@ export function ClientInspections({ who }: { who: 'tenant' | 'owner' }) {
     work.clientInspections(who).then((r) => setItems(r.items)).catch((e) => setError(message(e)))
   }, [who])
 
-  if (openId !== null) return <ClientInspection who={who} id={openId} onBack={() => setOpenId(null)} />
   return (
     <>
       {error && <Alert>{error}</Alert>}
@@ -301,7 +309,7 @@ export function ClientInspections({ who }: { who: 'tenant' | 'owner' }) {
             <thead><tr><th>Tipo</th><th>Imóvel / unidade</th><th>Realizada em</th><th /></tr></thead>
             <tbody>
               {items.map((i) => (
-                <tr key={i.id}>
+                <tr key={i.id} className="clickable" onClick={() => setOpenId(i.id)}>
                   <td>Vistoria de {INSP_TYPE[i.type].toLowerCase()}</td>
                   <td>{i.property_name} · {i.unit_identifier}</td>
                   <td>{date(i.performed_at)}</td>
@@ -311,6 +319,11 @@ export function ClientInspections({ who }: { who: 'tenant' | 'owner' }) {
             </tbody>
           </table>
         </div>
+      )}
+      {openId !== null && (
+        <Modal size="xl" onClose={() => setOpenId(null)}>
+          <ClientInspection who={who} id={openId} onBack={() => setOpenId(null)} />
+        </Modal>
       )}
     </>
   )
@@ -352,7 +365,7 @@ function ClientInspection({ who, id, onBack }: { who: 'tenant' | 'owner'; id: nu
   return (
     <>
       <div className="page-head no-print">
-        <button onClick={onBack}>← Vistorias</button>
+        <button className="back-btn" onClick={onBack}>← Vistorias</button>
         <h3 style={{ margin: 0 }}>Vistoria de {INSP_TYPE[d.inspection.type].toLowerCase()} — {d.inspection.property_name} · {d.inspection.unit_identifier}</h3>
         <button onClick={() => setReport(true)}>Ver laudo</button>
       </div>

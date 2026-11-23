@@ -10,6 +10,7 @@ import {
 } from './api'
 import { brl, date, parseReais, reaisInput } from './format'
 import { Alert, Toast, Loading, ask } from './feedback'
+import Modal from './Modal'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 const today = () => new Date().toLocaleDateString('sv-SE') // AAAA-MM-DD no fuso local
@@ -112,7 +113,8 @@ export default function FinancePage({ isAdmin }: { isAdmin: boolean }) {
       {notice && <Toast>{notice}</Toast>}
 
       {receipt && (
-        <div className="panel print-area">
+        <Modal size="md" onClose={() => setReceipt(null)}>
+        <div className="print-area">
           <div className="paper-head no-print">
             <strong>{receipt.title}</strong>
             <div className="actions">
@@ -122,6 +124,7 @@ export default function FinancePage({ isAdmin }: { isAdmin: boolean }) {
           </div>
           <article className="paper">{receipt.content}</article>
         </div>
+        </Modal>
       )}
 
       <div className="tabs no-print" role="tablist">
@@ -158,6 +161,7 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
   const [status, setStatus] = useState<'' | ChargeStatus>('')
   const [paying, setPaying] = useState<Charge | null>(null)
   const [adding, setAdding] = useState(false)
+  const [viewing, setViewing] = useState<Charge | null>(null)
 
   useEffect(() => {
     api
@@ -201,14 +205,66 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
         <button className="primary" onClick={generate}>Gerar aluguéis do mês</button>
       </div>
 
-      {adding && <NewCharge onDone={() => { setAdding(false); onChange() }} onCancel={() => setAdding(false)} onError={onError} />}
+      {adding && (
+        <Modal title="Nova cobrança avulsa" onClose={() => setAdding(false)}>
+          <NewCharge onDone={() => { setAdding(false); onChange() }} onCancel={() => setAdding(false)} onError={onError} />
+        </Modal>
+      )}
       {paying && (
-        <ReceivePayment
-          charge={paying}
-          onCancel={() => setPaying(null)}
-          onDone={(id) => { setPaying(null); onOk('Pagamento registrado e baixa efetuada.'); onChange(); onReceipt(id) }}
-          onError={onError}
-        />
+        <Modal title="Receber pagamento" subtitle={`${paying.description} · ${paying.tenant_names}`} onClose={() => setPaying(null)}>
+          <ReceivePayment
+            charge={paying}
+            onCancel={() => setPaying(null)}
+            onDone={(id) => { setPaying(null); onOk('Pagamento registrado e baixa efetuada.'); onChange(); onReceipt(id) }}
+            onError={onError}
+          />
+        </Modal>
+      )}
+      {viewing && (
+        <Modal
+          title={viewing.description}
+          subtitle={`${viewing.property_name} · ${viewing.unit_identifier}`}
+          size="sm"
+          onClose={() => setViewing(null)}
+          footer={
+            <>
+              <button onClick={() => setViewing(null)}>Fechar</button>
+              {isAdmin && viewing.status !== 'cancelada' && viewing.paid_cents === 0 && (
+                <button
+                  className="danger"
+                  onClick={() => {
+                    const c = viewing
+                    setViewing(null)
+                    void cancel(c)
+                  }}
+                >
+                  Cancelar cobrança
+                </button>
+              )}
+              {(viewing.status === 'aberta' || viewing.status === 'parcial' || viewing.status === 'vencida') && (
+                <button
+                  className="primary"
+                  onClick={() => {
+                    const c = viewing
+                    setViewing(null)
+                    setPaying(c)
+                  }}
+                >
+                  Receber
+                </button>
+              )}
+            </>
+          }
+        >
+          <dl className="view-grid">
+            <div className="wide"><dt>Locatário</dt><dd>{viewing.tenant_names}</dd></div>
+            <div><dt>Vencimento</dt><dd>{date(viewing.due_date)}</dd></div>
+            <div><dt>Situação</dt><dd><span className={`badge badge-c-${viewing.status}`}>{STATUS_LABEL[viewing.status]}</span></dd></div>
+            <div><dt>Valor</dt><dd>{brl(viewing.amount_cents)}</dd></div>
+            <div><dt>Pago</dt><dd>{brl(viewing.paid_cents)}</dd></div>
+            <div><dt>Saldo</dt><dd>{brl(Math.max(0, viewing.amount_cents - viewing.paid_cents))}</dd></div>
+          </dl>
+        </Modal>
       )}
 
       {loading ? (
@@ -223,14 +279,14 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
             </thead>
             <tbody>
               {items.map((c) => (
-                <tr key={c.id}>
+                <tr key={c.id} className="clickable" onClick={() => setViewing(c)}>
                   <td>{date(c.due_date)}</td>
                   <td>{c.property_name} · {c.unit_identifier}<div className="muted small">{c.tenant_names}</div></td>
                   <td>{c.description}</td>
                   <td>{brl(c.amount_cents)}</td>
                   <td>{brl(c.paid_cents)}</td>
                   <td><span className={`badge badge-c-${c.status}`}>{STATUS_LABEL[c.status]}</span></td>
-                  <td className="row-actions">
+                  <td className="row-actions" onClick={(e) => e.stopPropagation()}>
                     {(c.status === 'aberta' || c.status === 'parcial' || c.status === 'vencida') && (
                       <button onClick={() => setPaying(c)}>Receber</button>
                     )}

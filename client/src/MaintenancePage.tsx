@@ -5,6 +5,7 @@ import { CATEGORY, MAINT_STATUS, PRIORITY } from './labels'
 import { brl, dateTime, parseReais } from './format'
 import PhotoStrip from './PhotoStrip'
 import { Alert, Loading, toast } from './feedback'
+import Modal from './Modal'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -12,9 +13,26 @@ type View = { kind: 'list' } | { kind: 'new' } | { kind: 'detail'; id: number }
 
 export default function MaintenancePage({ isAdmin, currentUserId }: { isAdmin: boolean; currentUserId: number }) {
   const [view, setView] = useState<View>({ kind: 'list' })
-  if (view.kind === 'new') return <NewRequest onDone={(id) => setView({ kind: 'detail', id })} onCancel={() => setView({ kind: 'list' })} />
-  if (view.kind === 'detail') return <Detail id={view.id} isAdmin={isAdmin} currentUserId={currentUserId} onBack={() => setView({ kind: 'list' })} />
-  return <List onOpen={(id) => setView({ kind: 'detail', id })} onNew={() => setView({ kind: 'new' })} />
+  const [version, setVersion] = useState(0)
+  const close = () => {
+    setView({ kind: 'list' })
+    setVersion((v) => v + 1)
+  }
+  return (
+    <>
+      <List key={version} onOpen={(id) => setView({ kind: 'detail', id })} onNew={() => setView({ kind: 'new' })} />
+      {view.kind === 'new' && (
+        <Modal size="lg" onClose={close}>
+          <NewRequest onDone={(id) => setView({ kind: 'detail', id })} onCancel={close} />
+        </Modal>
+      )}
+      {view.kind === 'detail' && (
+        <Modal size="xl" onClose={close}>
+          <Detail id={view.id} isAdmin={isAdmin} currentUserId={currentUserId} onBack={close} />
+        </Modal>
+      )}
+    </>
+  )
 }
 
 // ----------------------------------------------------------------------- Lista
@@ -62,14 +80,14 @@ function List({ onOpen, onNew }: { onOpen: (id: number) => void; onNew: () => vo
               </thead>
               <tbody>
                 {items.map((m) => (
-                  <tr key={m.id}>
+                  <tr key={m.id} className="clickable" onClick={() => onOpen(m.id)}>
                     <td><span className={`badge badge-p-${m.priority}`}>{PRIORITY[m.priority]}</span></td>
                     <td>{m.title}<div className="muted small">{CATEGORY[m.category]}{m.opened_by_name ? ` · aberto por ${m.opened_by_name}` : ''}</div></td>
                     <td>{m.property_name} · {m.unit_identifier}</td>
                     <td>{m.assigned_name ?? <span className="muted">—</span>}</td>
                     <td><span className={`badge badge-m-${m.status}`}>{MAINT_STATUS[m.status]}</span></td>
                     <td>{dateTime(m.updated_at)}</td>
-                    <td className="row-actions"><button onClick={() => onOpen(m.id)}>Abrir</button></td>
+                    <td className="row-actions" onClick={(e) => e.stopPropagation()}><button onClick={() => onOpen(m.id)}>Abrir</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -237,7 +255,7 @@ function Detail({ id, isAdmin, currentUserId, onBack }: { id: number; isAdmin: b
   return (
     <section>
       <div className="page-head">
-        <button onClick={onBack}>← Chamados</button>
+        <button className="back-btn" onClick={onBack}>← Chamados</button>
         <h2>{item.title}</h2>
         <span className={`badge badge-m-${item.status}`}>{MAINT_STATUS[item.status]}</span>
         <span className={`badge badge-p-${item.priority}`}>{PRIORITY[item.priority]}</span>

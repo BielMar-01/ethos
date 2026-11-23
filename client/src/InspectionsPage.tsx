@@ -6,6 +6,7 @@ import { date } from './format'
 import PhotoStrip from './PhotoStrip'
 import { ReadOnlyChecklist, ReportPaper, Signatures } from './InspectionView'
 import { Alert, Loading, ask, toast } from './feedback'
+import Modal from './Modal'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 const today = () => new Date().toLocaleDateString('sv-SE')
@@ -14,9 +15,26 @@ type View = { kind: 'list' } | { kind: 'new' } | { kind: 'detail'; id: number }
 
 export default function InspectionsPage() {
   const [view, setView] = useState<View>({ kind: 'list' })
-  if (view.kind === 'new') return <NewInspection onDone={(id) => setView({ kind: 'detail', id })} onCancel={() => setView({ kind: 'list' })} />
-  if (view.kind === 'detail') return <InspectionDetail id={view.id} onBack={() => setView({ kind: 'list' })} />
-  return <List onOpen={(id) => setView({ kind: 'detail', id })} onNew={() => setView({ kind: 'new' })} />
+  const [version, setVersion] = useState(0)
+  const close = () => {
+    setView({ kind: 'list' })
+    setVersion((n) => n + 1)
+  }
+  return (
+    <>
+      <List key={version} onOpen={(id) => setView({ kind: 'detail', id })} onNew={() => setView({ kind: 'new' })} />
+      {view.kind === 'new' && (
+        <Modal size="md" onClose={close}>
+          <NewInspection onDone={(id) => setView({ kind: 'detail', id })} onCancel={close} />
+        </Modal>
+      )}
+      {view.kind === 'detail' && (
+        <Modal size="xl" onClose={close}>
+          <InspectionDetail id={view.id} onBack={close} />
+        </Modal>
+      )}
+    </>
+  )
 }
 
 // ----------------------------------------------------------------------- Lista
@@ -62,13 +80,13 @@ function List({ onOpen, onNew }: { onOpen: (id: number) => void; onNew: () => vo
             <thead><tr><th>Tipo</th><th>Imóvel / unidade</th><th>Data</th><th>Checklist</th><th>Status</th><th /></tr></thead>
             <tbody>
               {items.map((i) => (
-                <tr key={i.id}>
+                <tr key={i.id} className="clickable" onClick={() => onOpen(i.id)}>
                   <td>{INSP_TYPE[i.type]}</td>
                   <td>{i.property_name} · {i.unit_identifier}</td>
                   <td>{date(i.performed_at ?? i.scheduled_for)}</td>
                   <td>{i.items_done}/{i.items_total}</td>
                   <td><span className={`badge badge-i-${i.status}`}>{INSP_STATUS[i.status]}</span></td>
-                  <td className="row-actions"><button onClick={() => onOpen(i.id)}>Abrir</button></td>
+                  <td className="row-actions" onClick={(e) => e.stopPropagation()}><button onClick={() => onOpen(i.id)}>Abrir</button></td>
                 </tr>
               ))}
             </tbody>
@@ -231,7 +249,7 @@ function InspectionDetail({ id, onBack }: { id: number; onBack: () => void }) {
   return (
     <section>
       <div className="page-head no-print">
-        <button onClick={onBack}>← Vistorias</button>
+        <button className="back-btn" onClick={onBack}>← Vistorias</button>
         <h2>Vistoria de {INSP_TYPE[insp.type].toLowerCase()} — {insp.property_name} · {insp.unit_identifier}</h2>
         <span className={`badge badge-i-${insp.status}`}>{INSP_STATUS[insp.status]}</span>
       </div>

@@ -3,6 +3,7 @@ import { api, type Item } from './api'
 import { comm, type Announcement, type Audience } from './commApi'
 import { dateTime } from './format'
 import { Alert, Toast, Loading, ask } from './feedback'
+import Modal from './Modal'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -24,6 +25,7 @@ export default function AnnouncementsPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [editing, setEditing] = useState<Announcement | 'new' | null>(null)
+  const [viewing, setViewing] = useState<Announcement | null>(null)
   const [form, setForm] = useState({ title: '', body: '', audience: 'todos' as Audience, property_id: '' })
 
   const load = useCallback(async () => {
@@ -91,9 +93,20 @@ export default function AnnouncementsPage() {
       {error && <Alert>{error}</Alert>}
       {notice && <Toast>{notice}</Toast>}
 
+      {viewing && (
+        <Modal title={viewing.title} subtitle={`Para: ${viewing.audience === 'imovel' ? viewing.property_name : AUDIENCE[viewing.audience]}`} onClose={() => setViewing(null)} footer={<button onClick={() => setViewing(null)}>Fechar</button>}>
+          <div className="meta">
+            <span className={`badge ${STATUS_CLASS[viewing.status ?? 'rascunho']}`}>{STATUS_LABEL[viewing.status ?? 'rascunho']}</span>
+            <span>{viewing.published_at ? `Publicado em ${dateTime(viewing.published_at)}` : `Criado em ${dateTime(viewing.created_at ?? '')}`}</span>
+            {viewing.created_by_name && <span>por {viewing.created_by_name}</span>}
+          </div>
+          <p style={{ whiteSpace: 'pre-wrap' }}>{viewing.body}</p>
+        </Modal>
+      )}
+
       {editing && (
-        <form className="panel form-grid" onSubmit={save}>
-          <h3>{editing === 'new' ? 'Novo comunicado' : 'Editar rascunho'}</h3>
+        <Modal title={editing === 'new' ? 'Novo comunicado' : 'Editar rascunho'} onClose={() => setEditing(null)}>
+        <form className="form-grid" onSubmit={save}>
           <label className="span-all">Título<input value={form.title} maxLength={150} required onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
           <label>Quem vai receber
             <select value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value as Audience })}>
@@ -119,6 +132,7 @@ export default function AnnouncementsPage() {
             <button type="submit" className="primary">Salvar rascunho</button>
           </div>
         </form>
+        </Modal>
       )}
 
       {loading ? (
@@ -137,6 +151,7 @@ export default function AnnouncementsPage() {
             <h3>{a.title}</h3>
             <p>{a.body}</p>
             <div className="actions left" style={{ marginTop: '0.6rem' }}>
+              <button onClick={() => setViewing(a)}>Ver</button>
               {a.status === 'rascunho' && (
                 <>
                   <button className="primary" onClick={() => publish(a)}>Publicar</button>

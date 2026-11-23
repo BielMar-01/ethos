@@ -1,6 +1,8 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { db } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
+import { background } from "./background.js";
+import { emitWebhook, eventFor } from "./webhooks.js";
 
 export type AuditKind = "create" | "update" | "delete" | "action" | "auth" | "denied" | "system";
 
@@ -87,37 +89,39 @@ interface Rule {
   path: RegExp;
   kind: AuditKind;
   summary: string;
+  /** Evento de webhook (só as regras com evento explícito saem do sistema). */
+  event?: string;
 }
 
 const rules: Rule[] = [
-  { method: "POST", path: /^\/api\/leases\/:id\/status$/, kind: "action", summary: "Mudou o status do contrato" },
+  { method: "POST", path: /^\/api\/leases\/:id\/status$/, kind: "action", summary: "Mudou o status do contrato", event: "lease.status_changed" },
   { method: "POST", path: /^\/api\/leases\/:id\/documents$/, kind: "create", summary: "Emitiu documento de contrato" },
   { method: "POST", path: /^\/api\/leases\/:id\/preview$/, kind: "system", summary: "" },
-  { method: "POST", path: /^\/api\/charges\/generate$/, kind: "action", summary: "Gerou cobranças do mês" },
-  { method: "POST", path: /^\/api\/charges\/:id\/cancel$/, kind: "action", summary: "Cancelou cobrança" },
-  { method: "POST", path: /^\/api\/payments$/, kind: "create", summary: "Registrou pagamento" },
-  { method: "POST", path: /^\/api\/payments\/:id\/void$/, kind: "action", summary: "Estornou pagamento" },
+  { method: "POST", path: /^\/api\/charges\/generate$/, kind: "action", summary: "Gerou cobranças do mês", event: "charges.generated" },
+  { method: "POST", path: /^\/api\/charges\/:id\/cancel$/, kind: "action", summary: "Cancelou cobrança", event: "charge.cancelled" },
+  { method: "POST", path: /^\/api\/payments$/, kind: "create", summary: "Registrou pagamento", event: "payment.received" },
+  { method: "POST", path: /^\/api\/payments\/:id\/void$/, kind: "action", summary: "Estornou pagamento", event: "payment.voided" },
   { method: "POST", path: /^\/api\/transfers\/generate$/, kind: "action", summary: "Gerou repasses do mês" },
-  { method: "POST", path: /^\/api\/transfers\/:id\/pay$/, kind: "action", summary: "Marcou repasse como pago" },
+  { method: "POST", path: /^\/api\/transfers\/:id\/pay$/, kind: "action", summary: "Marcou repasse como pago", event: "transfer.paid" },
   { method: "PUT", path: /^\/api\/settings\/finance$/, kind: "update", summary: "Alterou a taxa de administração" },
-  { method: "POST", path: /^\/api\/maintenance\/:id\/status$/, kind: "action", summary: "Mudou o status do chamado" },
+  { method: "POST", path: /^\/api\/maintenance\/:id\/status$/, kind: "action", summary: "Mudou o status do chamado", event: "maintenance.status_changed" },
   { method: "POST", path: /^\/api\/maintenance\/:id\/comments$/, kind: "create", summary: "Comentou em chamado" },
   { method: "POST", path: /^\/api\/maintenance\/:id\/photos$/, kind: "create", summary: "Anexou foto ao chamado" },
   { method: "POST", path: /^\/api\/maintenance\/:id\/quotes$/, kind: "create", summary: "Registrou orçamento" },
   { method: "POST", path: /^\/api\/maintenance\/:id\/quotes\/:id\/approve$/, kind: "action", summary: "Aprovou orçamento" },
   { method: "POST", path: /^\/api\/maintenance\/:id\/quotes\/:id\/reject$/, kind: "action", summary: "Recusou orçamento" },
-  { method: "POST", path: /^\/api\/inspections\/:id\/status$/, kind: "action", summary: "Mudou o status da vistoria" },
+  { method: "POST", path: /^\/api\/inspections\/:id\/status$/, kind: "action", summary: "Mudou o status da vistoria", event: "inspection.status_changed" },
   { method: "POST", path: /^\/api\/inspections\/:id\/items$/, kind: "create", summary: "Adicionou item à vistoria" },
   { method: "POST", path: /^\/api\/inspections\/:id\/items\/:id\/photos$/, kind: "create", summary: "Anexou foto à vistoria" },
   { method: "DELETE", path: /^\/api\/inspections\/:id\/items\/:id$/, kind: "delete", summary: "Removeu item da vistoria" },
   { method: "PATCH", path: /^\/api\/inspections\/:id\/items\/:id$/, kind: "update", summary: "Avaliou item da vistoria" },
   { method: "POST", path: /^\/api\/inspections\/:id\/signatures$/, kind: "action", summary: "Registrou ciência da vistoria" },
   { method: "POST", path: /^\/api\/portal\/(tenant|owner)\/inspections\/:id\/sign$/, kind: "action", summary: "Registrou ciência da vistoria" },
-  { method: "POST", path: /^\/api\/portal\/tenant\/maintenance$/, kind: "create", summary: "Abriu chamado de manutenção" },
+  { method: "POST", path: /^\/api\/portal\/tenant\/maintenance$/, kind: "create", summary: "Abriu chamado de manutenção", event: "maintenance.created" },
   { method: "POST", path: /^\/api\/portal\/tenant\/maintenance\/:id\/cancel$/, kind: "action", summary: "Cancelou o próprio chamado" },
   { method: "POST", path: /^\/api\/portal\/tenant\/maintenance\/:id\/comments$/, kind: "create", summary: "Comentou no próprio chamado" },
   { method: "POST", path: /^\/api\/portal\/tenant\/maintenance\/:id\/photos$/, kind: "create", summary: "Anexou foto ao próprio chamado" },
-  { method: "POST", path: /^\/api\/announcements\/:id\/publish$/, kind: "action", summary: "Publicou comunicado" },
+  { method: "POST", path: /^\/api\/announcements\/:id\/publish$/, kind: "action", summary: "Publicou comunicado", event: "announcement.published" },
   { method: "POST", path: /^\/api\/announcements\/:id\/archive$/, kind: "action", summary: "Arquivou comunicado" },
   { method: "POST", path: /^\/api\/members\/:id\/password-reset$/, kind: "action", summary: "Redefiniu a senha de um membro" },
   { method: "POST", path: /^\/api\/invitations\/by-token\/:token\/accept$/, kind: "auth", summary: "Aceitou um convite" },
@@ -134,6 +138,14 @@ const rules: Rule[] = [
   { method: "POST", path: /^\/api\/auth\/login$/, kind: "auth", summary: "Entrou no sistema" },
   { method: "POST", path: /^\/api\/auth\/register$/, kind: "auth", summary: "Criou a organização e a conta" },
   { method: "DELETE", path: /^\/api\/photos\/:id$/, kind: "delete", summary: "Removeu foto" },
+  { method: "PUT", path: /^\/api\/integrations\/\w+$/, kind: "update", summary: "Configurou uma integração" },
+  { method: "DELETE", path: /^\/api\/integrations\/\w+$/, kind: "delete", summary: "Desconectou uma integração" },
+  { method: "POST", path: /^\/api\/integrations\/\w+\/test$/, kind: "action", summary: "Testou a conexão de uma integração" },
+  { method: "POST", path: /^\/api\/webhooks$/, kind: "create", summary: "Criou um endereço de webhook" },
+  { method: "PATCH", path: /^\/api\/webhooks\/:id$/, kind: "update", summary: "Alterou um endereço de webhook" },
+  { method: "DELETE", path: /^\/api\/webhooks\/:id$/, kind: "delete", summary: "Excluiu um endereço de webhook" },
+  { method: "POST", path: /^\/api\/webhooks\/:id\/rotate-secret$/, kind: "action", summary: "Gerou novo segredo de webhook" },
+  { method: "POST", path: /^\/api\/webhooks\/:id\/test$/, kind: "action", summary: "Testou um endereço de webhook" },
 ];
 
 /** Escritas que não merecem registro (ruído sem valor de auditoria). */
@@ -174,16 +186,16 @@ function findId(obj: unknown): number | undefined {
 }
 
 /** Descreve a requisição: usa a tabela de regras e cai num texto genérico (CRUD) para o resto. */
-function describe(method: string, path: string): { kind: AuditKind; summary: string; entity: string } | null {
+function describe(method: string, path: string): { kind: AuditKind; summary: string; entity: string; event?: string; generic: boolean } | null {
   const norm = normalize(path);
   const segs = path.split("/").filter(Boolean); // api, recurso, ...
   const resource = segs[1] === "portal" ? "portal" : (segs[1] ?? "");
   const rule = rules.find((r) => r.method === method && r.path.test(norm));
-  if (rule) return rule.summary ? { kind: rule.kind, summary: rule.summary, entity: resource } : null;
+  if (rule) return rule.summary ? { kind: rule.kind, summary: rule.summary, entity: resource, event: rule.event, generic: false } : null;
   const noun = ENTITY[resource] ?? resource;
-  if (method === "POST") return { kind: "create", summary: `Cadastrou ${noun}`, entity: resource };
-  if (method === "PUT" || method === "PATCH") return { kind: "update", summary: `Alterou ${noun}`, entity: resource };
-  if (method === "DELETE") return { kind: "delete", summary: `Excluiu ${noun}`, entity: resource };
+  if (method === "POST") return { kind: "create", summary: `Cadastrou ${noun}`, entity: resource, generic: true };
+  if (method === "PUT" || method === "PATCH") return { kind: "update", summary: `Alterou ${noun}`, entity: resource, generic: true };
+  if (method === "DELETE") return { kind: "delete", summary: `Excluiu ${noun}`, entity: resource, generic: true };
   return null;
 }
 
@@ -226,7 +238,24 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
     for (const k of BODY_KEYS) if (typeof reqBody[k] === "string" || typeof reqBody[k] === "number") metadata[k] = reqBody[k];
     if (label) metadata.label = label;
 
-    void recordAudit({
+    // Webhooks de saída: só escritas bem-sucedidas de módulos de negócio (ver webhooks.ts).
+    if (ok) {
+      const event = info.generic ? eventFor(info.entity, info.kind) : (info.event ?? null);
+      if (event) {
+        emitWebhook({
+          organizationId: actor.organizationId,
+          event,
+          actor: { id: actor.userId, name: actor.userName, role: actor.role ?? null },
+          entity: info.entity,
+          entityId: entityId ?? null,
+          summary: `${info.summary}${label ? ` — ${label}` : ""}`,
+          data: payload,
+        });
+      }
+    }
+
+    background(
+      recordAudit({
       ...actor,
       kind: denied ? "denied" : info.kind,
       entity: info.entity,
@@ -235,7 +264,8 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       status: res.statusCode,
       metadata,
       ...requestInfo(req),
-    });
+    }),
+    );
   });
   next();
 }

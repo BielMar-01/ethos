@@ -11,6 +11,7 @@ import './layout.css'
 import './ux.css'
 import './public.css'
 import './shell.css'
+import './modal.css'
 import { Alert, Loading, toast } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')

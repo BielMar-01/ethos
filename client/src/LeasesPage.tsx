@@ -11,6 +11,7 @@ import {
 } from './api'
 import { brl, date, dateTime, parseReais, reaisInput } from './format'
 import { Alert, Toast, Loading, ask } from './feedback'
+import Modal from './Modal'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -29,29 +30,30 @@ type View = { kind: 'list' } | { kind: 'form'; id?: number } | { kind: 'detail';
 
 export default function LeasesPage({ isAdmin }: { isAdmin: boolean }) {
   const [view, setView] = useState<View>({ kind: 'list' })
-  if (view.kind === 'form') {
-    return (
-      <LeaseForm
-        id={view.id}
-        onDone={(id) => setView({ kind: 'detail', id })}
-        onCancel={() => setView(view.id ? { kind: 'detail', id: view.id } : { kind: 'list' })}
-      />
-    )
+  const [version, setVersion] = useState(0)
+  /** Fecha o modal e recarrega a lista (o contrato pode ter mudado de situação). */
+  const close = () => {
+    setView({ kind: 'list' })
+    setVersion((v) => v + 1)
   }
-  if (view.kind === 'detail') {
-    return (
-      <LeaseDetailView
-        id={view.id}
-        isAdmin={isAdmin}
-        onBack={() => setView({ kind: 'list' })}
-        onEdit={() => setView({ kind: 'form', id: view.id })}
-      />
-    )
-  }
-  return <LeaseList onOpen={(id) => setView({ kind: 'detail', id })} onNew={() => setView({ kind: 'form' })} />
+  return (
+    <>
+      <LeaseList key={version} onOpen={(id) => setView({ kind: 'detail', id })} onNew={() => setView({ kind: 'form' })} />
+      {view.kind === 'form' && (
+        <Modal size="lg" onClose={() => (view.id ? setView({ kind: 'detail', id: view.id }) : close())}>
+          <LeaseForm id={view.id} onDone={(id) => setView({ kind: 'detail', id })} onCancel={() => (view.id ? setView({ kind: 'detail', id: view.id }) : close())} />
+        </Modal>
+      )}
+      {view.kind === 'detail' && (
+        <Modal size="xl" onClose={close}>
+          <LeaseDetailView id={view.id} isAdmin={isAdmin} onBack={close} onEdit={() => setView({ kind: 'form', id: view.id })} />
+        </Modal>
+      )}
+    </>
+  )
 }
 
-// ----------------------------------------------------------------------- Lista
+// ------------------------------------------------------------------ Lista
 
 function LeaseList({ onOpen, onNew }: { onOpen: (id: number) => void; onNew: () => void }) {
   const [items, setItems] = useState<LeaseSummary[]>([])
@@ -105,7 +107,7 @@ function LeaseList({ onOpen, onNew }: { onOpen: (id: number) => void; onNew: () 
             </thead>
             <tbody>
               {visible.map((l) => (
-                <tr key={l.id}>
+                <tr key={l.id} className="clickable" onClick={() => onOpen(l.id)}>
                   <td>
                     {l.property_name} · {l.unit_identifier}
                   </td>
@@ -117,7 +119,7 @@ function LeaseList({ onOpen, onNew }: { onOpen: (id: number) => void; onNew: () 
                   <td>
                     <Badge status={l.status} />
                   </td>
-                  <td className="row-actions">
+                  <td className="row-actions" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => onOpen(l.id)}>Abrir</button>
                   </td>
                 </tr>
@@ -368,7 +370,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
   return (
     <section>
       <div className="page-head no-print">
-        <button onClick={onBack}>← Contratos</button>
+        <button className="back-btn" onClick={onBack}>← Contratos</button>
         <h2>
           {unit.property_name} · {unit.identifier}
         </h2>

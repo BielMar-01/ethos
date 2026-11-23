@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 export type IconName =
   | 'building' | 'file' | 'wallet' | 'camera' | 'wrench' | 'users' | 'shield' | 'code' | 'check'
   | 'bell' | 'sun' | 'moon' | 'monitor' | 'menu' | 'x' | 'megaphone' | 'home' | 'tag' | 'key'
-  | 'layout' | 'door' | 'user' | 'logout' | 'download' | 'history' | 'search' | 'upload'
+  | 'layout' | 'door' | 'user' | 'logout' | 'download' | 'history' | 'search' | 'upload' | 'plug'
 
 const PATHS: Record<IconName, ReactNode> = {
   building: <><path d="M4 21V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v16" /><path d="M14 9h5a1 1 0 0 1 1 1v11" /><path d="M8 8h2M8 12h2M8 16h2M3 21h18" /></>,
@@ -29,6 +29,7 @@ const PATHS: Record<IconName, ReactNode> = {
   door: <><path d="M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17" /><path d="M3 21h18M14 12h.01" /></>,
   user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
   download: <><path d="M12 4v11M7.5 11 12 15.5 16.5 11" /><path d="M5 19h14" /></>,
+  plug: <><path d="M9 3v5M15 3v5" /><path d="M6 8h12v3a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></>,
   upload: <><path d="M12 16V5M7.5 9 12 4.5 16.5 9" /><path d="M5 19h14" /></>,
   history: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
   search: <><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></>,

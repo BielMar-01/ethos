@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, type ApiKey, type OpenApiDoc } from './api'
 import { dateTime } from './format'
 import { Alert, Loading, ask, toast } from './feedback'
+import Modal from './Modal'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -84,7 +85,11 @@ export default function ApiPage({ isAdmin }: { isAdmin: boolean }) {
         </p>
       </div>
 
-      {isAdmin && <KeysPanel />}
+      {isAdmin && (
+        <p className="muted small">
+          Para criar ou revogar chaves de API, use <strong>Administração › Integrações › Chaves de API</strong>.
+        </p>
+      )}
 
       {!doc ? (
         <Loading label="Carregando documentação…" />
@@ -139,10 +144,11 @@ export default function ApiPage({ isAdmin }: { isAdmin: boolean }) {
   )
 }
 
-function KeysPanel() {
+export function KeysPanel() {
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [name, setName] = useState('')
   const [created, setCreated] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -186,20 +192,62 @@ function KeysPanel() {
     <div className="panel stack">
       <h3 style={{ margin: 0 }}>Chaves de API</h3>
       {error && <Alert>{error}</Alert>}
-      {created && (
-        <div className="key-once">
-          <strong>Copie agora: esta chave não será exibida novamente.</strong>
-          <input readOnly value={created} aria-label="Nova chave de API" onFocus={(e) => e.currentTarget.select()} />
-          <div className="actions">
-            <button onClick={() => setCreated(null)}>Já copiei</button>
-            <button className="primary" onClick={() => navigator.clipboard?.writeText(created)}>Copiar</button>
-          </div>
-        </div>
+      <div>
+        <button className="primary" onClick={() => setCreating(true)}>Nova chave</button>
+      </div>
+      {creating && (
+        <Modal
+          title={created ? 'Chave criada' : 'Nova chave de API'}
+          size="sm"
+          locked={!!created}
+          onClose={() => {
+            setCreating(false)
+            setCreated(null)
+          }}
+        >
+          {created ? (
+            <div className="key-once">
+              <strong>Copie agora: esta chave não será exibida novamente.</strong>
+              <input readOnly value={created} aria-label="Nova chave de API" onFocus={(e) => e.currentTarget.select()} />
+              <div className="modal-actions">
+                <button
+                  className="primary"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(created)
+                      toast.success('Chave copiada.')
+                    } catch {
+                      toast.error('Não foi possível copiar. Selecione e copie manualmente.')
+                    }
+                  }}
+                >
+                  Copiar
+                </button>
+                <button
+                  onClick={() => {
+                    setCreating(false)
+                    setCreated(null)
+                  }}
+                >
+                  Já copiei
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form className="stack" onSubmit={create}>
+              <label>
+                Nome da chave
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Integração BI, n8n" maxLength={100} required />
+              </label>
+              <p className="muted small">A chave é somente leitura e aparece uma única vez. Quem a tiver consulta os dados da organização.</p>
+              {error && <Alert>{error}</Alert>}
+              <div className="actions">
+                <button type="submit" className="primary">Criar chave</button>
+              </div>
+            </form>
+          )}
+        </Modal>
       )}
-      <form className="inline" onSubmit={create}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome (ex.: Integração BI)" maxLength={100} required aria-label="Nome da chave" />
-        <button type="submit" className="primary">Criar chave</button>
-      </form>
       {keys.length === 0 ? (
         <p className="muted">Nenhuma chave criada.</p>
       ) : (

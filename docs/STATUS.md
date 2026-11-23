@@ -21,9 +21,11 @@
 - ✅ **Vistorias**: checklist por ambiente, fotos, conclusão só com tudo avaliado, laudo, registro de ciência, comparação entrada × saída, imutável depois de concluída.
 - ✅ **Comunicados e notificações**: comunicados por público (todos, inquilinos, proprietários, imóvel); notificações internas por eventos; **lembretes automáticos** (vencimento próximo, atraso, fim de contrato); preferências por categoria.
 - ✅ **Registros de atividade (auditoria)**: toda escrita e toda negação de permissão, login e login falho; só o admin vê; filtros, paginação e CSV; imutável.
+- ✅ **Modais em todo o sistema**: criar, editar, visualizar, detalhar e excluir abrem em modal responsivo (tela cheia no celular).
+- 🟡 **Integrações (admin)**: Asaas (guarda e testa a chave), IA da organização, **webhooks de saída assinados** (n8n/Make/Zapier) e chaves de API. **Falta**: emitir boleto/Pix/cartão pelo Asaas, receber o webhook do Asaas (conciliação), escrita via API/n8n → Ethos (chaves hoje são só leitura), reenvio manual de entregas que falharam. O teste do Asaas e da Anthropic usa chamadas reais só quando o admin clica em Testar — **não foi exercitado contra os serviços reais**.
 - ✅ **CEP**: máscara e preenchimento automático do endereço (ViaCEP → BrasilAPI, via servidor).
 - 🟡 **Cadastro por documento (IA)**: foto/PDF de RG, CNH, contrato, matrícula, IPTU → sugestões de proprietário, inquilino, imóvel, unidade e **rascunho** de contrato, com revisão antes de gravar. **Só liga com `ANTHROPIC_API_KEY`; nunca testado com a API real** (os testes usam cliente falso). Qualidade de leitura depende do documento: sempre conferir.
-- ✅ **Testes E2E em navegador (Playwright)**: 54 testes (desktop e celular) sobre o demo; rodam no CI.
+- ✅ **Testes E2E em navegador (Playwright)**: 69 testes (desktop e celular) sobre o demo; rodam no CI.
 - ✅ **Redefinição de senha pelo admin** (e-mail, link ou senha definida na hora/temporária), com sessões encerradas e auditoria.
 - ✅ **Importação em massa** por CSV (proprietários, inquilinos, imóveis, unidades — vários arquivos de uma vez), com simulação, tudo-ou-nada, linha do erro e sem duplicar. 🟡 tela nunca vista em navegador.
 - 🟡 **Áreas públicas** com animações, transições e login em tela dividida (nunca vistas em navegador).

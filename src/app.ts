@@ -21,6 +21,8 @@ import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
 import { importRouter } from "./importer.js";
 import { cepRouter } from "./cep.js";
+import { integrationsRouter } from "./integrations.js";
+import { webhooksRouter } from "./webhooks.js";
 import { extractRouter } from "./extract.js";
 import { auditMiddleware, auditRouter, recordAudit, requestInfo } from "./audit.js";
 
@@ -313,6 +315,8 @@ export function createApp() {
   app.use("/api", auditRouter);
   app.use("/api", importRouter);
   app.use("/api", cepRouter);
+  app.use("/api", integrationsRouter);
+  app.use("/api", webhooksRouter);
   app.use("/api", extractRouter);
   app.use("/api", apiKeysRouter);
   app.get("/api/openapi.json", (req, res) => {

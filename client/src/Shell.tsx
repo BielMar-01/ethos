@@ -9,6 +9,7 @@ import FinancePage from './FinancePage'
 import Icon, { type IconName } from './Icon'
 import ImportPage from './ImportPage'
 import IntakePage from './IntakePage'
+import IntegrationsPage from './IntegrationsPage'
 import InspectionsPage from './InspectionsPage'
 import LeasesPage from './LeasesPage'
 import MaintenancePage from './MaintenancePage'
@@ -59,6 +60,7 @@ const STAFF_NAV: { label?: string; items: NavItem[] }[] = [
       { key: 'templates', label: 'Modelos', icon: 'tag' },
       { key: 'team', label: 'Equipe', icon: 'shield', adminOnly: true },
       { key: 'audit', label: 'Registros', icon: 'history', adminOnly: true },
+      { key: 'integrations', label: 'Integrações', icon: 'plug', adminOnly: true },
       { key: 'api', label: 'API', icon: 'code' },
     ],
   },
@@ -185,6 +187,7 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
   else if (current === 'team' && isAdmin) content = <TeamPage key={`t-${orgKey}`} currentUserId={session.user.id} />
   else if (current === 'intake') content = <IntakePage key={`in-${orgKey}`} onNavigate={navigate} />
   else if (current === 'import') content = <ImportPage key={`im-${orgKey}`} />
+  else if (current === 'integrations' && isAdmin) content = <IntegrationsPage key={`ig-${orgKey}`} />
   else if (current === 'audit' && isAdmin) content = <AuditPage key={`au-${orgKey}`} />
   else if (current === 'leases') content = <LeasesPage key={`l-${orgKey}`} isAdmin={isAdmin} />
   else if (current === 'finance') content = <FinancePage key={`f-${orgKey}`} isAdmin={isAdmin} />

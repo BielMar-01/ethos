@@ -31,7 +31,13 @@ export default defineConfig({
     // O servidor já responde ao /api/health ANTES de terminar de popular os dados e criar os logins de cliente:
     // esperamos a mensagem final, senão os primeiros testes (em paralelo) levam 401 no login do inquilino.
     wait: { stdout: /Tudo é descartado ao encerrar/ },
-    env: { PORT: String(PORT) },
+    env: {
+      PORT: String(PORT),
+      // Integrações: chave de cifra de teste e permissão para webhooks apontarem para um receptor local do próprio teste.
+      INTEGRATIONS_SECRET: "e2e-segredo-com-mais-de-32-caracteres-ok",
+      ETHOS_ALLOW_PRIVATE_WEBHOOKS: "1",
+      ETHOS_WEBHOOK_BACKOFF_MS: "10",
+    },
     reuseExistingServer: !process.env.CI,
     timeout: 90_000,
   },

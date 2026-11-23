@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, type Template } from './api'
 import { dateTime } from './format'
 import { Alert, Loading, ask, toast } from './feedback'
+import Modal from './Modal'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -28,6 +29,7 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<Template | 'new' | null>(null)
+  const [viewing, setViewing] = useState<Template | null>(null)
   const [name, setName] = useState('')
   const [body, setBody] = useState('')
   const bodyRef = useRef<HTMLTextAreaElement>(null)
@@ -104,9 +106,47 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
       </div>
       {error && <Alert>{error}</Alert>}
 
+      {viewing && (
+        <Modal
+          title={viewing.name}
+          subtitle={`Versão ${viewing.version} · atualizado em ${dateTime(viewing.updated_at)}`}
+          size="lg"
+          onClose={() => setViewing(null)}
+          footer={
+            <>
+              <button onClick={() => setViewing(null)}>Fechar</button>
+              {canDelete && (
+                <button
+                  className="danger"
+                  onClick={() => {
+                    const x = viewing
+                    setViewing(null)
+                    void remove(x)
+                  }}
+                >
+                  Excluir
+                </button>
+              )}
+              <button
+                className="primary"
+                onClick={() => {
+                  const x = viewing
+                  setViewing(null)
+                  open(x)
+                }}
+              >
+                Editar
+              </button>
+            </>
+          }
+        >
+          <pre className="doc-preview">{viewing.body}</pre>
+        </Modal>
+      )}
+
       {editing && (
-        <form className="panel stack" onSubmit={save}>
-          <h3>{editing === 'new' ? 'Novo modelo' : `Editar modelo (versão atual: ${editing.version})`}</h3>
+        <Modal title={editing === 'new' ? 'Novo modelo' : `Editar modelo (versão atual: ${editing.version})`} size="lg" onClose={() => setEditing(null)}>
+        <form className="stack" onSubmit={save}>
           <label>
             Nome
             <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} />
@@ -152,6 +192,7 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
             </button>
           </div>
         </form>
+        </Modal>
       )}
 
       {loading ? (
@@ -171,11 +212,12 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
             </thead>
             <tbody>
               {items.map((t) => (
-                <tr key={t.id}>
+                <tr key={t.id} className="clickable" onClick={() => setViewing(t)}>
                   <td>{t.name}</td>
                   <td>v{t.version}</td>
                   <td>{dateTime(t.updated_at)}</td>
-                  <td className="row-actions">
+                  <td className="row-actions" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => setViewing(t)}>Ver</button>
                     <button onClick={() => open(t)}>Editar</button>
                     {canDelete && (
                       <button className="danger" onClick={() => remove(t)}>

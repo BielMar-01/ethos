@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, type Item } from './api'
 import { cepDigits, lookupCep, maskCep } from './cep'
+import Modal from './Modal'
 import type { FieldDef, ResourceDef } from './resources'
 import { Alert, Loading, ask, toast } from './feedback'
 
@@ -26,6 +27,7 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<Item | 'new' | null>(null)
+  const [viewing, setViewing] = useState<Item | null>(null)
   const [form, setForm] = useState<FormState>({})
   const [query, setQuery] = useState('')
   const [cepHint, setCepHint] = useState<{ kind: 'busy' | 'ok' | 'error'; text: string } | null>(null)
@@ -138,9 +140,53 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
 
       {error && <Alert>{error}</Alert>}
 
+      {viewing && (
+        <Modal
+          title={String(viewing[def.fields[0]!.name] ?? def.singular)}
+          subtitle={def.singular[0]!.toUpperCase() + def.singular.slice(1)}
+          onClose={() => setViewing(null)}
+          footer={
+            <>
+              <button onClick={() => setViewing(null)}>Fechar</button>
+              {canDelete && (
+                <button
+                  className="danger"
+                  onClick={() => {
+                    const it = viewing
+                    setViewing(null)
+                    void remove(it)
+                  }}
+                >
+                  Excluir
+                </button>
+              )}
+              <button
+                className="primary"
+                onClick={() => {
+                  const it = viewing
+                  setViewing(null)
+                  open(it)
+                }}
+              >
+                Editar
+              </button>
+            </>
+          }
+        >
+          <dl className="view-grid">
+            {def.fields.map((f) => (
+              <div key={f.name}>
+                <dt>{f.label}</dt>
+                <dd>{display(f, viewing)}</dd>
+              </div>
+            ))}
+          </dl>
+        </Modal>
+      )}
+
       {editing && (
-        <form className="panel form-grid" onSubmit={save}>
-          <h3>{editing === 'new' ? `Novo ${def.singular}` : `Editar ${def.singular}`}</h3>
+        <Modal title={editing === 'new' ? `Novo ${def.singular}` : `Editar ${def.singular}`} onClose={() => setEditing(null)} size="md">
+        <form className="form-grid" onSubmit={save}>
           {def.fields.map((f) => (
             <label key={f.name}>
               {f.label}
@@ -196,6 +242,7 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
             </button>
           </div>
         </form>
+        </Modal>
       )}
 
       {loading ? (
@@ -217,11 +264,12 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
             </thead>
             <tbody>
               {visible.map((it) => (
-                <tr key={it.id}>
+                <tr key={it.id} className="clickable" onClick={() => setViewing(it)}>
                   {columns.map((c) => (
                     <td key={c.name}>{display(c, it)}</td>
                   ))}
-                  <td className="row-actions">
+                  <td className="row-actions" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => setViewing(it)}>Ver</button>
                     <button onClick={() => open(it)}>Editar</button>
                     {canDelete && (
                       <button className="danger" onClick={() => remove(it)}>
