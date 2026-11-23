@@ -1,15 +1,7 @@
--- Credenciais passam a ser do Supabase Auth; a tabela users guarda só o vínculo (auth_id).
--- Falha de propósito se já houver usuários: as contas existentes precisariam ser
--- criadas no Supabase Auth antes (senão ficariam sem acesso).
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM users) THEN
-    RAISE EXCEPTION 'users não está vazia: migre as contas para o Supabase Auth antes de aplicar 002';
-  END IF;
-END $$;
-
-ALTER TABLE users DROP COLUMN password_hash;
-ALTER TABLE users ADD COLUMN auth_id uuid NOT NULL UNIQUE;
+-- Credenciais passam a ser do Supabase Auth. Esta etapa só ADICIONA o vínculo (auth_id,
+-- opcional por enquanto) para permitir migrar contas existentes; a 003 torna-o obrigatório.
+ALTER TABLE users ADD COLUMN auth_id uuid UNIQUE;
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
 
 -- Convites: o token em texto puro só existe no link entregue ao admin; aqui fica o hash.
 CREATE TABLE invitations (

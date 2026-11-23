@@ -10,7 +10,8 @@
     "start": "node dist/server.js",
     "dev:server": "tsx watch src/server.ts",
     "dev:client": "npm --prefix client run dev",
-    "db:migrate": "tsx src/migrate.ts"
+    "db:migrate": "tsx src/migrate.ts",
+    "user:reset-password": "tsx src/cli/resetPassword.ts"
   },
   "keywords": [],
   "author": "",

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, type InviteInfo, type Session } from './api'
+import PasswordInput from './PasswordInput'
 import ResourcePage from './ResourcePage'
 import TeamPage from './TeamPage'
 import { RESOURCES } from './resources'
@@ -102,10 +103,10 @@ function AuthForm({ onAuth, notice }: { onAuth: (s: Session) => void; notice?: s
       {mode !== 'forgot' && (
         <label>
           Senha
-          <input
-            type="password"
+          <PasswordInput
             value={password}
             minLength={mode === 'register' ? 8 : undefined}
+            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
             onChange={(e) => setPassword(e.target.value)}
             required
           />
@@ -156,11 +157,11 @@ function ResetPassword({ accessToken, onDone }: { accessToken: string; onDone: (
     <Page title="Nova senha" onSubmit={submit}>
       <label>
         Nova senha
-        <input type="password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <PasswordInput minLength={8} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
       </label>
       <label>
         Confirmar senha
-        <input type="password" minLength={8} value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+        <PasswordInput minLength={8} autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
       </label>
       {error && <p className="error" role="alert">{error}</p>}
       <button type="submit" className="primary" disabled={busy}>
@@ -223,9 +224,9 @@ function AcceptInvite({ token, onAuth, onCancel }: { token: string; onAuth: (s: 
       )}
       <label>
         {info.existingAccount ? 'Sua senha' : 'Escolha uma senha'}
-        <input
-          type="password"
+        <PasswordInput
           minLength={info.existingAccount ? undefined : 8}
+          autoComplete={info.existingAccount ? 'current-password' : 'new-password'}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
