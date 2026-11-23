@@ -1,6 +1,7 @@
 // Postgres em memória (PGlite) e provedor de identidade em memória: nunca tocam o Supabase.
 process.env.ETHOS_DB = "memory";
 process.env.REGISTER_RATE_MAX = "1000";
+process.env.ACCEPT_RATE_MAX = "1000";
 process.env.APP_URL = "http://app.test";
 
 import assert from "node:assert/strict";

@@ -2,7 +2,7 @@ import { Router, type Request } from "express";
 import { requireAuth } from "./auth.js";
 import { db, transaction } from "./db.js";
 import { parseId } from "./crud.js";
-import { CATEGORIES, addUpdate, isTerminal, type MaintStatus } from "./maintenance.js";
+import { CATEGORIES, addUpdate, isTerminal, notifyRequestStaff, type MaintStatus } from "./maintenance.js";
 import { buildReport, loadItems, loadSignatures, recordSignature } from "./inspections.js";
 import { rawImage, storePhoto } from "./photos.js";
 import { RateLimiter } from "./ratelimit.js";
@@ -57,6 +57,7 @@ portalExtraRouter.post("/portal/tenant/maintenance", ...tenantGuard, async (req,
     await addUpdate(tx, req.auth!.organization.id, row!.id, clientAuthor(req), "status", "Solicitação aberta pelo inquilino");
     return row!;
   });
+  await notifyRequestStaff(req.auth!.organization.id, created.id, "maintenance_opened", `Nova solicitação de ${req.auth!.user.name}`);
   res.status(201).json({ id: created.id });
 });
 
@@ -96,6 +97,7 @@ portalExtraRouter.post("/portal/tenant/maintenance/:id/comments", ...tenantGuard
   const message = clientText(req.body?.message, 2000);
   if (!message) return void res.status(400).json({ error: "Informe a mensagem (até 2000 caracteres)" });
   await addUpdate(db, req.auth!.organization.id, own.id, clientAuthor(req), "comentario", message, true);
+  await notifyRequestStaff(req.auth!.organization.id, own.id, "maintenance_comment", `${req.auth!.user.name}: ${message.slice(0, 160)}`);
   res.status(201).json({ ok: true });
 });
 
@@ -110,6 +112,7 @@ portalExtraRouter.post("/portal/tenant/maintenance/:id/cancel", ...tenantGuard, 
     await tx.query("UPDATE maintenance_requests SET status = 'cancelada', cancelled_reason = $1 WHERE id = $2", [reason, own.id]);
     await addUpdate(tx, req.auth!.organization.id, own.id, clientAuthor(req), "status", `Status: Cancelada — ${reason}`);
   });
+  await notifyRequestStaff(req.auth!.organization.id, own.id, "maintenance_cancelled", `Cancelada pelo inquilino: ${reason}`);
   res.status(204).end();
 });
 

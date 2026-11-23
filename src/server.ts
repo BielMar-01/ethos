@@ -1,10 +1,12 @@
 import { createApp } from "./app.js";
 import { migrate } from "./db.js";
+import { startReminderJob } from "./reminders.js";
 
 const port = Number(process.env.PORT ?? 3000);
 
 async function main() {
   const ran = await migrate();
+  startReminderJob();
   if (ran.length) console.log(`Migrações aplicadas: ${ran.join(", ")}`);
   createApp().listen(port, () => {
     console.log(`Ethos rodando em http://localhost:${port}`);

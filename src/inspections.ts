@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from "./auth.js";
 import { isRealDate, parseId } from "./crud.js";
 import { formatDate, joinNames } from "./contractTemplate.js";
 import { rawImage, storePhoto } from "./photos.js";
+import { notify, ownerUsersOfProperty, tenantUsersOfLease } from "./notifications.js";
 
 export const TYPES = ["entrada", "saida", "periodica"] as const;
 export const CONDITIONS = ["novo", "bom", "regular", "ruim", "danificado"] as const;
@@ -205,6 +206,14 @@ inspectionsRouter.post("/inspections", async (req, res) => {
     }
     return row!;
   });
+  await notify(orgId, await tenantUsersOfLease(leaseId), {
+    category: "vistoria",
+    kind: "inspection_scheduled",
+    title: `Vistoria de ${TYPE_LABEL[type]!.toLowerCase()} agendada`,
+    body: `Prevista para ${formatDate(scheduled_for)}`,
+    linkKind: "inspection",
+    linkId: created.id,
+  });
   res.status(201).json({ id: created.id });
 });
 
@@ -385,6 +394,24 @@ inspectionsRouter.post("/inspections/:id/status", async (req, res) => {
     return { code: 200 };
   });
   if (out.code !== 200) return void res.status(out.code).json({ error: out.error });
+  if (target === "concluida") {
+    // O laudo passa a valer para o inquilino do contrato e para os proprietários do imóvel.
+    const [info] = await db.query<{ lease_id: number | null; property_id: number; type: string }>(
+      "SELECT i.lease_id, u.property_id, i.type FROM inspections i JOIN units u ON u.id = i.unit_id WHERE i.id = $1",
+      [req.params.id],
+    );
+    if (info) {
+      const users = [...(await tenantUsersOfLease(info.lease_id)), ...(await ownerUsersOfProperty(info.property_id))];
+      await notify(orgId, users, {
+        category: "vistoria",
+        kind: "inspection_completed",
+        title: `Laudo da vistoria de ${TYPE_LABEL[info.type]!.toLowerCase()} disponível`,
+        body: "Leia o laudo e registre a sua ciência.",
+        linkKind: "inspection",
+        linkId: Number(req.params.id),
+      });
+    }
+  }
   res.json({ status: target });
 });
 

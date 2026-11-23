@@ -42,6 +42,26 @@ async function main() {
     await post(`/api/invitations/by-token/${token}/accept`, { name, password: PASSWORD });
   }
 
+  // Com os clientes já existentes: um comunicado de boas-vindas e os lembretes automáticos,
+  // para os sinos de notificação já abrirem com conteúdo.
+  const login = await fetch(base + "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "admin@demo.test", password: PASSWORD }),
+  });
+  const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0]!;
+  const asAdmin = async (path: string, body?: unknown) => {
+    const res = await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return res.json();
+  };
+  const welcome = await asAdmin("/api/announcements", {
+    title: "Bem-vindo(a) à área do cliente",
+    body: "Aqui você acompanha cobranças, recibos, contrato, vistorias e pode abrir solicitações de manutenção.",
+    audience: "todos",
+  });
+  await asAdmin(`/api/announcements/${welcome.id}/publish`);
+  await asAdmin("/api/reminders/run");
+
   console.log(`\nEthos (DEMO em memória) em ${base}\n`);
   console.log("Logins (senha de todos: " + PASSWORD + "):");
   console.log("  Administrador: admin@demo.test");

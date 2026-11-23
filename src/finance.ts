@@ -3,6 +3,7 @@ import { db, transaction, isUniqueViolation } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 import { isRealDate, parseId } from "./crud.js";
 import { formatBRL, formatDate, joinNames } from "./contractTemplate.js";
+import { notify, tenantUsersOfLease } from "./notifications.js";
 
 export const financeRouter = Router();
 financeRouter.use(
@@ -432,7 +433,16 @@ financeRouter.post("/payments", async (req, res) => {
     res.status(outcome.code).json({ error: outcome.error });
     return;
   }
-  res.status(201).json({ payment: outcome.payment });
+  const created = outcome.payment!;
+  await notify(orgId, await tenantUsersOfLease(leaseId!), {
+    category: "financeiro",
+    kind: "payment_received",
+    title: "Pagamento identificado",
+    body: `${formatBRL(amount_cents)} · recibo nº ${created.receipt_number}`,
+    linkKind: "payment",
+    linkId: created.id,
+  });
+  res.status(201).json({ payment: created });
 });
 
 /** Estorno: o pagamento é marcado como anulado (histórico preservado) e as cobranças voltam a ficar em aberto. */
@@ -444,9 +454,9 @@ financeRouter.post("/payments/:id/void", requireRole("admin"), async (req, res) 
   }
   const id = parseId(req.params.id);
   const done = id
-    ? await db.query(
+    ? await db.query<{ id: number; lease_id: number; amount_cents: number; receipt_number: number }>(
         `UPDATE payments SET voided_at = now(), void_reason = $1
-         WHERE id = $2 AND organization_id = $3 AND voided_at IS NULL RETURNING id`,
+         WHERE id = $2 AND organization_id = $3 AND voided_at IS NULL RETURNING id, lease_id, amount_cents, receipt_number`,
         [reason, id, req.auth!.organization.id],
       )
     : [];
@@ -454,6 +464,15 @@ financeRouter.post("/payments/:id/void", requireRole("admin"), async (req, res) 
     res.status(404).json({ error: "Pagamento não encontrado ou já estornado" });
     return;
   }
+  const p = done[0]!;
+  await notify(req.auth!.organization.id, await tenantUsersOfLease(p.lease_id), {
+    category: "financeiro",
+    kind: "payment_voided",
+    title: "Pagamento estornado",
+    body: `Recibo nº ${p.receipt_number} (${formatBRL(p.amount_cents)}) foi estornado: ${reason}`,
+    linkKind: "payment",
+    linkId: p.id,
+  });
   res.status(204).end();
 });
 

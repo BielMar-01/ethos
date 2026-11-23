@@ -59,6 +59,9 @@ describe("dados de demonstração", () => {
     const doneDetail = (await admin.call("GET", `/api/inspections/${done.id}`)).body;
     assert.equal(doneDetail.signatures.length, 2);
     assert.ok(doneDetail.items.some((i: { photos: number[] }) => i.photos.length === 1));
+    const ann = (await admin.call("GET", "/api/announcements")).body.items;
+    assert.deepEqual(ann.map((a: { status: string }) => a.status).sort(), ["publicado", "rascunho"]);
+    assert.equal(summary.announcements, 2);
     assert.equal(summary.maintenance, 3);
     assert.equal(summary.inspections, 2);
 

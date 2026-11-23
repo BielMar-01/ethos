@@ -13,7 +13,7 @@ export interface Endpoint {
   summary: string;
   description?: string;
   /** Quem pode chamar. */
-  access: "staff" | "admin" | "inquilino" | "proprietario";
+  access: "staff" | "admin" | "inquilino" | "proprietario" | "cliente" | "any";
   /** Aceita chave de API (somente leitura, age como colaborador)? */
   apiKey: boolean;
   query?: { name: string; description: string; example: string }[];
@@ -101,6 +101,20 @@ export const ENDPOINTS: Endpoint[] = [
     responseExample: { status: "concluida", report: "LAUDO DE VISTORIA DE ENTRADA\n\nImóvel: Edifício Aurora — unidade Apto 101…" } },
   { tag: "Vistorias", method: "get", path: "/api/inspections/{id}/compare/{otherId}", summary: "Compara duas vistorias concluídas da mesma unidade", description: "Aponta o que piorou, melhorou ou ficou igual (típico: entrada × saída).", access: "staff", apiKey: true, status: 200,
     responseExample: { first: { id: 6, type: "entrada" }, second: { id: 14, type: "saida" }, summary: { piorou: 2, melhorou: 0, igual: 25, so_na_primeira: 0, so_na_segunda: 0 }, items: [{ room: "Sala", item: "Paredes", change: "piorou", first: { condition: "bom" }, second: { condition: "ruim" } }] } },
+  // ---- Comunicados e notificações
+  { tag: "Comunicados e notificações", method: "get", path: "/api/announcements", summary: "Lista comunicados (rascunhos, publicados e arquivados)", access: "staff", apiKey: true, status: 200,
+    responseExample: list({ id: 3, title: "Obras na fachada", audience: "inquilinos", property_name: null, status: "publicado", published_at: "2026-11-10T12:00:00Z", created_by_name: "Ana Administradora" }) },
+  { tag: "Comunicados e notificações", method: "post", path: "/api/announcements", summary: "Cria um comunicado (rascunho)", description: "Público: `todos`, `inquilinos`, `proprietarios` ou `imovel` (exige `property_id`). Nada é enviado até publicar.", access: "staff", apiKey: false, status: 201,
+    requestExample: { title: "Obras na fachada", body: "Entre os dias 10 e 20 haverá obra na fachada.", audience: "inquilinos" }, responseExample: { id: 3 } },
+  { tag: "Comunicados e notificações", method: "post", path: "/api/announcements/{id}/publish", summary: "Publica o comunicado e notifica o público", description: "Só quem já está vinculado a um cadastro recebe. Publicar é irreversível (arquive para retirar).", access: "staff", apiKey: false, status: 200,
+    responseExample: { recipients: 12, notified: 12 } },
+  { tag: "Comunicados e notificações", method: "get", path: "/api/notifications", summary: "Minha caixa de entrada", description: "Notificações internas do usuário na organização atual. Categorias: financeiro, manutencao, vistoria, contrato, comunicado.", access: "any", apiKey: false, status: 200,
+    query: [{ name: "unread", description: "1 = só não lidas", example: "1" }, { name: "limit", description: "Até 100", example: "20" }],
+    responseExample: { unread: 2, items: [{ id: 51, category: "financeiro", kind: "payment_received", title: "Pagamento identificado", body: "R$ 2.500,00 · recibo nº 57", link_kind: "payment", link_id: 88, read_at: null, created_at: "2026-11-04T15:00:00Z" }] } },
+  { tag: "Comunicados e notificações", method: "post", path: "/api/reminders/run", summary: "Gera os lembretes agora (vencimento próximo, atraso, fim de contrato)", description: "Idempotente. Também roda sozinho a cada 6 horas.", access: "admin", apiKey: false, status: 200,
+    responseExample: { dueSoon: 3, overdue: 1, overdueDigest: 1, leasesEnding: 2 } },
+  { tag: "Comunicados e notificações", method: "get", path: "/api/portal/announcements", summary: "Comunicados que se aplicam a mim", access: "cliente", apiKey: false, status: 200,
+    responseExample: list({ id: 3, title: "Obras na fachada", body: "Entre os dias 10 e 20…", audience: "inquilinos", published_at: "2026-11-10T12:00:00Z", property_name: null }) },
   // ---- Área do cliente
   { tag: "Área do cliente — inquilino", method: "get", path: "/api/portal/tenant/maintenance", summary: "Meus chamados de manutenção", access: "inquilino", apiKey: false, status: 200,
     responseExample: list({ id: 31, title: "Vazamento na pia", category: "hidraulica", priority: "alta", status: "em_execucao", unit_identifier: "Apto 101", property_name: "Edifício Aurora" }) },
@@ -130,10 +144,12 @@ export const ENDPOINTS: Endpoint[] = [
 ];
 
 const ACCESS_TEXT: Record<Endpoint["access"], string> = {
-  staff: "Administrador ou colaborador (sessão) — leitura também por chave de API",
+  staff: "Administrador ou colaborador (sessão)",
   admin: "Somente administrador (sessão)",
   inquilino: "Somente inquilino (sessão)",
   proprietario: "Somente proprietário (sessão)",
+  cliente: "Inquilino ou proprietário (sessão)",
+  any: "Qualquer usuário autenticado (sessão); chaves de API não têm caixa de entrada",
 };
 
 /** Monta o documento OpenAPI 3.0.3. */
@@ -149,7 +165,12 @@ export function buildOpenApi(serverUrl: string) {
     (paths[e.path] ??= {})[e.method] = {
       tags: [e.tag],
       summary: e.summary,
-      description: [e.description, `**Acesso:** ${ACCESS_TEXT[e.access]}.`].filter(Boolean).join("\n\n"),
+      description: [
+        e.description,
+        `**Acesso:** ${ACCESS_TEXT[e.access]}${e.access === "staff" && e.apiKey ? " — leitura também por chave de API" : ""}.`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       security: e.apiKey ? [{ ApiKey: [] }, { Session: [] }] : [{ Session: [] }],
       parameters: [...pathParams, ...queryParams],
       ...(e.requestExample === undefined

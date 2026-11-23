@@ -26,6 +26,7 @@ export interface DemoSummary {
   transfers: number;
   maintenance: number;
   inspections: number;
+  announcements: number;
   invites: { label: string; link: string }[];
 }
 
@@ -245,6 +246,15 @@ export async function seedDemo(organizationId: number, userId: number): Promise<
     await call("POST", `/api/inspections/${entry}/signatures`, { role: "locatario", signer_name: "Carlos Almeida" });
     await call("POST", "/api/inspections", { unit_id: units[1], type: "periodica", scheduled_for: `${addMonths(current, 1)}-10` });
 
+    // Comunicados: um publicado para os inquilinos e um rascunho pendente.
+    const notice = (await call("POST", "/api/announcements", {
+      title: "Manutenção da caixa d'água",
+      body: "No sábado, das 8h às 12h, o abastecimento será interrompido para limpeza da caixa d'água. Pedimos que armazenem água com antecedência.",
+      audience: "inquilinos",
+    })).id as number;
+    await call("POST", `/api/announcements/${notice}/publish`);
+    await call("POST", "/api/announcements", { title: "Reajuste anual dos contratos", body: "Rascunho: texto sobre o reajuste anual a ser revisado antes de enviar.", audience: "todos" });
+
     // Convites para experimentar a área do cliente.
     const invites: DemoSummary["invites"] = [];
     const tenantInvite = await call("POST", "/api/invitations", { email: "demo.inquilino@example.com", role: "inquilino", tenantId: tenants[0] });
@@ -254,7 +264,7 @@ export async function seedDemo(organizationId: number, userId: number): Promise<
 
     return {
       owners: 2, properties: 2, units: units.length, tenants: tenants.length, leases: leases.length, charges, payments, transfers,
-      maintenance: 3, inspections: 2, invites,
+      maintenance: 3, inspections: 2, announcements: 2, invites,
     };
   } finally {
     server.close();

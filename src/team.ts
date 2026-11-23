@@ -10,7 +10,7 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
 const hashToken = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
-const acceptLimiter = new RateLimiter(20, 15 * 60 * 1000);
+const acceptLimiter = new RateLimiter(Number(process.env.ACCEPT_RATE_MAX ?? 20), 15 * 60 * 1000);
 const resetLimiter = new RateLimiter(10, 60 * 60 * 1000);
 
 export const teamRouter = Router();

@@ -3,6 +3,7 @@ import { db, transaction, type Queryable } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 import { parseId } from "./crud.js";
 import { rawImage, storePhoto } from "./photos.js";
+import { notify, staffUsers, tenantUsersOfLease } from "./notifications.js";
 
 export const CATEGORIES = ["hidraulica", "eletrica", "estrutural", "pintura", "fechaduras", "eletrodomesticos", "pragas", "outro"] as const;
 export const PRIORITIES = ["baixa", "media", "alta", "urgente"] as const;
@@ -52,6 +53,20 @@ export async function addUpdate(
     [orgId, requestId, author.id, author.name, kind, message, clientVisible],
   );
   await q.query("UPDATE maintenance_requests SET updated_at = now() WHERE id = $1", [requestId]);
+}
+
+/** Avisa os inquilinos do contrato sobre o chamado (só eventos visíveis ao cliente). */
+export async function notifyRequestTenants(orgId: number, requestId: number, kind: string, body: string): Promise<void> {
+  const [r] = await db.query<{ title: string; lease_id: number | null }>("SELECT title, lease_id FROM maintenance_requests WHERE id = $1", [requestId]);
+  if (!r) return;
+  await notify(orgId, await tenantUsersOfLease(r.lease_id), { category: "manutencao", kind, title: `Chamado: ${r.title}`, body, linkKind: "maintenance", linkId: requestId });
+}
+
+/** Avisa a equipe (o responsável, ou os administradores) sobre algo que o cliente fez no chamado. */
+export async function notifyRequestStaff(orgId: number, requestId: number, kind: string, body: string): Promise<void> {
+  const [r] = await db.query<{ title: string; assigned_to: number | null }>("SELECT title, assigned_to FROM maintenance_requests WHERE id = $1", [requestId]);
+  if (!r) return;
+  await notify(orgId, await staffUsers(orgId, r.assigned_to), { category: "manutencao", kind, title: `Chamado: ${r.title}`, body, linkKind: "maintenance", linkId: requestId });
 }
 
 export const maintenanceRouter = Router();
@@ -279,6 +294,7 @@ maintenanceRouter.post("/maintenance/:id/status", async (req, res) => {
     return { code: 200 };
   });
   if (out.code !== 200) return void res.status(out.code).json({ error: out.error });
+  await notifyRequestTenants(orgId, id!, "maintenance_status", `Status: ${STATUS_LABEL[target]}`);
   res.json({ status: target });
 });
 
@@ -290,7 +306,9 @@ maintenanceRouter.post("/maintenance/:id/comments", async (req, res) => {
   const [row] = id ? await db.query("SELECT 1 FROM maintenance_requests WHERE id = $1 AND organization_id = $2", [id, orgId]) : [];
   if (!row) return void res.status(404).json({ error: "Não encontrado" });
   // Por padrão a nota é INTERNA; só vira visível ao cliente se a equipe marcar.
-  await addUpdate(db, orgId, id!, authorOf(req), "comentario", message, req.body?.client_visible === true);
+  const visible = req.body?.client_visible === true;
+  await addUpdate(db, orgId, id!, authorOf(req), "comentario", message, visible);
+  if (visible) await notifyRequestTenants(orgId, id!, "maintenance_comment", message.slice(0, 200));
   res.status(201).json({ ok: true });
 });
 

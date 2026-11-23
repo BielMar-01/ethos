@@ -13,6 +13,8 @@ import { portalExtraRouter } from "./portalExtra.js";
 import { maintenanceRouter } from "./maintenance.js";
 import { inspectionsRouter } from "./inspections.js";
 import { photosRouter } from "./photos.js";
+import { announcementsRouter, clientAnnouncementsRouter, notificationsRouter } from "./notifications.js";
+import { remindersRouter } from "./reminders.js";
 import { apiKeysRouter } from "./apikeys.js";
 import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
@@ -260,6 +262,12 @@ export function createApp() {
   app.use("/api", photosRouter);
   app.use("/api", portalRouter);
   app.use("/api", portalExtraRouter);
+
+  // ---------- Notificações, comunicados e lembretes ----------
+  app.use("/api", notificationsRouter);
+  app.use("/api", announcementsRouter);
+  app.use("/api", clientAnnouncementsRouter);
+  app.use("/api", remindersRouter);
   app.use("/api", apiKeysRouter);
   app.get("/api/openapi.json", (req, res) => {
     res.json(buildOpenApi(`${req.protocol}://${req.get("host")}`));
