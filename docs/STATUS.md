@@ -21,6 +21,9 @@
 - ✅ **Vistorias**: checklist por ambiente, fotos, conclusão só com tudo avaliado, laudo, registro de ciência, comparação entrada × saída, imutável depois de concluída.
 - ✅ **Comunicados e notificações**: comunicados por público (todos, inquilinos, proprietários, imóvel); notificações internas por eventos; **lembretes automáticos** (vencimento próximo, atraso, fim de contrato); preferências por categoria.
 - ✅ **Registros de atividade (auditoria)**: toda escrita e toda negação de permissão, login e login falho; só o admin vê; filtros, paginação e CSV; imutável.
+- ✅ **Redefinição de senha pelo admin** (e-mail, link ou senha definida na hora/temporária), com sessões encerradas e auditoria.
+- ✅ **Importação em massa** por CSV (proprietários, inquilinos, imóveis, unidades — vários arquivos de uma vez), com simulação, tudo-ou-nada, linha do erro e sem duplicar. 🟡 tela nunca vista em navegador.
+- 🟡 **Áreas públicas** com animações, transições e login em tela dividida (nunca vistas em navegador).
 - 🟡 **PWA**: instalável, abre offline com tela de aviso (dados nunca em cache); ícones provisórios.
 - 🟡 **Avisos e confirmações** padronizados (toasts, erros inline, diálogo de confirmação, esqueletos de carregamento).
 - ✅ **Painel** da equipe: ocupação, contratos, financeiro do mês, chamados, vistorias e "pede atenção agora".
@@ -55,7 +58,7 @@
 15. ⬜ **Permissões granulares** por módulo (hoje são 4 papéis fixos) e **auditoria** das ações críticas.
 16. ⬜ **SaaS**: superadministrador da plataforma, planos/assinaturas e cobrança, limites, onboarding, identidade por organização. **Modelo comercial ainda não definido.**
 17. ⬜ **Conta do usuário**: trocar senha dentro do app, perfil, MFA, verificação de e-mail, sessões ativas.
-18. ⬜ **Listagens grandes**: paginação, busca e ordenação no servidor, exportação.
+18. ⬜ **Listagens grandes**: paginação, busca e ordenação no servidor, exportação. Importação aceita só CSV (não .xlsx) e não cobre contratos nem cobranças.
 19. ⬜ **LGPD**: exportar e excluir dados do titular, política de retenção, termos de uso e privacidade (a home ainda não tem).
 20. ⬜ **Fotos em armazenamento de objetos** (hoje no PostgreSQL) quando o volume crescer.
 21. ⬜ **Páginas públicas adicionais**: preços, contato, institucional; SEO (sitemap, pré-renderização).

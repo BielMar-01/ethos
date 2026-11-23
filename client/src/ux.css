@@ -475,3 +475,152 @@ body > #root > .loading {
     display: none !important;
   }
 }
+
+/* ------------------------------------------------------------------ Redefinição de senha (admin) */
+.dialog.wide {
+  width: min(500px, 100%);
+}
+.reset-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.reset-alt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1.2rem;
+}
+.reset-alt button {
+  flex: 1 1 180px;
+}
+.secret-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 1.2rem;
+  padding: 0.8rem 1rem;
+  background: var(--surface-2);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+}
+.secret-box code {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* ------------------------------------------------------------------ Importação em massa */
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.9rem;
+  margin: 0.8rem 0;
+}
+.template-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.9rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.template-card button {
+  margin-top: auto;
+}
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 2.2rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.dropzone:hover,
+.dropzone.over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.dropzone.over {
+  transform: scale(1.01);
+}
+.file-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+.file-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.9rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  animation: fade-in 0.2s var(--ease);
+}
+.file-list li.needs-kind {
+  border-color: var(--warn);
+}
+.file-list .grow {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.import-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+.error-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 340px;
+  margin: 0.6rem 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.error-list li {
+  padding: 0.55rem 0.8rem;
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+}
+.error-list .where {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.success-panel {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  background: color-mix(in srgb, var(--ok) 7%, var(--surface));
+}

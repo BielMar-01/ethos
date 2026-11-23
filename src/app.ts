@@ -19,6 +19,7 @@ import { dashboardRouter } from "./dashboard.js";
 import { apiKeysRouter } from "./apikeys.js";
 import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
+import { importRouter } from "./importer.js";
 import { auditMiddleware, auditRouter, recordAudit, requestInfo } from "./audit.js";
 
 const MIN_PASSWORD = 8;
@@ -46,7 +47,9 @@ export function createApp() {
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     next();
   });
-  app.use(express.json({ limit: "100kb" }));
+  // A importação em massa tem o próprio limite de corpo (ver importer.ts); o resto da API aceita 100 KB.
+  const smallJson = express.json({ limit: "100kb" });
+  app.use((req, res, next) => (req.path === "/api/import" ? next() : smallJson(req, res, next)));
   app.use(loadAuth);
   app.use(auditMiddleware);
 
@@ -306,6 +309,7 @@ export function createApp() {
   app.use("/api", remindersRouter);
   app.use("/api", dashboardRouter);
   app.use("/api", auditRouter);
+  app.use("/api", importRouter);
   app.use("/api", apiKeysRouter);
   app.get("/api/openapi.json", (req, res) => {
     res.json(buildOpenApi(`${req.protocol}://${req.get("host")}`));

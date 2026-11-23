@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, ROLE_LABELS, type Invitation, type Item, type Member, type Role } from './api'
-import { Alert, Toast, Loading, ask } from './feedback'
+import { Alert, Toast, Loading, ask, toast } from './feedback'
+import PasswordInput from './PasswordInput'
 
 const ROLES = Object.keys(ROLE_LABELS) as Role[]
 
@@ -13,6 +14,7 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [link, setLink] = useState<{ label: string; url: string } | null>(null)
+  const [resetting, setResetting] = useState<Member | null>(null)
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('colaborador')
   const [tenants, setTenants] = useState<Item[]>([])
@@ -215,8 +217,7 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
                       )}
                     </td>
                     <td className="row-actions">
-                      <button onClick={() => resetByEmail(m)}>Redefinir senha (e-mail)</button>
-                      <button onClick={() => resetByLink(m)}>Gerar link</button>
+                      <button onClick={() => setResetting(m)}>Redefinir senha</button>
                       {m.id !== currentUserId && (
                         <button className="danger" onClick={() => remove(m)}>
                           Remover
@@ -262,6 +263,100 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
           )}
         </>
       )}
+      {resetting && (
+        <ResetPasswordDialog
+          member={resetting}
+          onClose={() => setResetting(null)}
+          onEmail={() => {
+            const m = resetting
+            setResetting(null)
+            return resetByEmail(m)
+          }}
+          onLink={() => {
+            const m = resetting
+            setResetting(null)
+            return resetByLink(m)
+          }}
+        />
+      )}
     </section>
+  )
+}
+
+/** Redefinição pela tela: o admin escolhe entre e-mail, link ou definir a senha agora (digitada ou gerada). */
+function ResetPasswordDialog({ member, onClose, onEmail, onLink }: { member: Member; onClose: () => void; onEmail: () => void; onLink: () => void }) {
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [created, setCreated] = useState<string | null>(null)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  async function setNow(e: FormEvent) {
+    e.preventDefault()
+    setError('')
+    if (password && password.length < 8) return setError('A senha deve ter pelo menos 8 caracteres.')
+    setBusy(true)
+    try {
+      const r = await api.memberPasswordReset(member.id, 'password', password || undefined)
+      if (r.password) setCreated(r.password)
+      else {
+        toast.success(`Senha de ${member.name} alterada. As sessões dela foram encerradas.`)
+        onClose()
+      }
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="dialog-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog wide" role="dialog" aria-modal="true" aria-labelledby="rp-title">
+        <h3 id="rp-title">Redefinir senha de {member.name}</h3>
+        {created ? (
+          <>
+            <p>Senha temporária criada. <strong>Ela só aparece agora</strong>: passe para {member.name} por um canal seguro e peça que a troque.</p>
+            <div className="secret-box">
+              <code>{created}</code>
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(created)
+                    toast.success('Senha copiada.')
+                  } catch {
+                    toast.error('Não foi possível copiar. Selecione e copie manualmente.')
+                  }
+                }}
+              >
+                Copiar
+              </button>
+            </div>
+            <div className="dialog-actions"><button className="primary" onClick={onClose}>Concluir</button></div>
+          </>
+        ) : (
+          <>
+            <p>Escolha como redefinir. Nos três casos as sessões abertas da pessoa deixam de valer assim que a nova senha é usada.</p>
+            <form onSubmit={setNow} className="reset-box">
+              <strong>Definir a senha agora</strong>
+              <span className="muted small">Digite uma senha ou deixe em branco para gerar uma temporária.</span>
+              <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Nova senha (mín. 8 caracteres)" autoComplete="new-password" />
+              {error && <Alert>{error}</Alert>}
+              <button className="primary" disabled={busy}>{busy ? 'Salvando…' : password ? 'Definir esta senha' : 'Gerar senha temporária'}</button>
+            </form>
+            <div className="reset-alt">
+              <button onClick={onEmail}>Enviar link por e-mail</button>
+              <button onClick={onLink}>Gerar link para copiar</button>
+            </div>
+            <div className="dialog-actions"><button onClick={onClose}>Cancelar</button></div>
+          </>
+        )}
+      </div>
+    </div>
   )
 }

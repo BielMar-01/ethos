@@ -398,8 +398,8 @@ export const api = {
   members: () => request<{ members: Member[] }>('/api/members'),
   setMemberRole: (id: number, role: Role) => request<unknown>(`/api/members/${id}`, json('PATCH', { role })),
   removeMember: (id: number) => request<void>(`/api/members/${id}`, { method: 'DELETE' }),
-  memberPasswordReset: (id: number, mode: 'email' | 'link') =>
-    request<{ sent?: boolean; link?: string }>(`/api/members/${id}/password-reset`, json('POST', { mode })),
+  memberPasswordReset: (id: number, mode: 'email' | 'link' | 'password', password?: string) =>
+    request<{ sent?: boolean; link?: string; changed?: boolean; password?: string }>(`/api/members/${id}/password-reset`, json('POST', { mode, password })),
   invitations: () => request<{ invitations: Invitation[] }>('/api/invitations'),
   createInvitation: (email: string, role: Role, link?: { tenantId?: number; ownerId?: number }) =>
     request<{ invitation: Invitation; link: string }>('/api/invitations', json('POST', { email, role, ...link })),

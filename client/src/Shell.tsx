@@ -7,6 +7,7 @@ import AuditPage from './AuditPage'
 import Dashboard from './Dashboard'
 import FinancePage from './FinancePage'
 import Icon, { type IconName } from './Icon'
+import ImportPage from './ImportPage'
 import InspectionsPage from './InspectionsPage'
 import LeasesPage from './LeasesPage'
 import MaintenancePage from './MaintenancePage'
@@ -37,6 +38,7 @@ const STAFF_NAV: { label?: string; items: NavItem[] }[] = [
       { key: 'units', label: 'Unidades', icon: 'door' },
       { key: 'owners', label: 'Proprietários', icon: 'user' },
       { key: 'tenants', label: 'Inquilinos', icon: 'users' },
+      { key: 'import', label: 'Importar dados', icon: 'upload' },
     ],
   },
   {
@@ -147,6 +149,7 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
   if (current === 'notifications') content = <NotificationsPage key={`n-${orgKey}`} onOpenItem={openNotification} isStaff={staff} />
   else if (!staff) content = <PortalPage key={`p-${orgKey}-${portalTarget?.n ?? 0}`} role={session.role} initialTab={portalTarget?.tab} />
   else if (current === 'team' && isAdmin) content = <TeamPage key={`t-${orgKey}`} currentUserId={session.user.id} />
+  else if (current === 'import') content = <ImportPage key={`im-${orgKey}`} />
   else if (current === 'audit' && isAdmin) content = <AuditPage key={`au-${orgKey}`} />
   else if (current === 'leases') content = <LeasesPage key={`l-${orgKey}`} isAdmin={isAdmin} />
   else if (current === 'finance') content = <FinancePage key={`f-${orgKey}`} isAdmin={isAdmin} />

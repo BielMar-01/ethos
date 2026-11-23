@@ -137,7 +137,7 @@ const rules: Rule[] = [
 ];
 
 /** Escritas que não merecem registro (ruído sem valor de auditoria). */
-const SKIP = [/^\/api\/notifications/, /^\/api\/audit/, /^\/api\/auth\/(forgot|reset)$/, /\/preview$/];
+const SKIP = [/^\/api\/import$/, /^\/api\/notifications/, /^\/api\/audit/, /^\/api\/auth\/(forgot|reset)$/, /\/preview$/];
 
 const BODY_KEYS = ["status", "role", "mode", "month", "audience", "reason", "type"] as const;
 const NAME_KEYS = ["name", "title", "description", "identifier", "email", "number"] as const;

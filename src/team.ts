@@ -1,13 +1,17 @@
 import crypto from "node:crypto";
 import { Router } from "express";
 import { db, transaction, ROLES, isUniqueViolation, type Role } from "./db.js";
-import { createSession, requireAuth, requireRole } from "./auth.js";
+import { createSession, currentSessionId, requireAuth, requireRole } from "./auth.js";
 import { AuthProviderError, appUrl, getAuthProvider } from "./authProvider.js";
 import { parseId } from "./crud.js";
 import { RateLimiter } from "./ratelimit.js";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
+
+const TEMP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+const generateTempPassword = (length = 14) =>
+  Array.from({ length }, () => TEMP_ALPHABET[crypto.randomInt(TEMP_ALPHABET.length)]).join("");
 
 const hashToken = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
 const acceptLimiter = new RateLimiter(Number(process.env.ACCEPT_RATE_MAX ?? 20), 15 * 60 * 1000);
@@ -134,13 +138,13 @@ teamRouter.post("/members/:userId/password-reset", ...adminOnly, async (req, res
   const orgId = req.auth!.organization.id;
   const userId = parseId(req.params.userId);
   const mode = req.body?.mode;
-  if (mode !== "email" && mode !== "link") {
-    res.status(400).json({ error: "mode deve ser 'email' ou 'link'" });
+  if (mode !== "email" && mode !== "link" && mode !== "password") {
+    res.status(400).json({ error: "mode deve ser 'email', 'link' ou 'password'" });
     return;
   }
   const [member] = userId
-    ? await db.query<{ email: string; orgs: string }>(
-        `SELECT u.email,
+    ? await db.query<{ email: string; auth_id: string; orgs: string }>(
+        `SELECT u.email, u.auth_id,
                 (SELECT count(*) FROM organization_members x WHERE x.user_id = u.id)::text AS orgs
          FROM organization_members m JOIN users u ON u.id = m.user_id
          WHERE m.organization_id = $1 AND m.user_id = $2`,
@@ -166,6 +170,29 @@ teamRouter.post("/members/:userId/password-reset", ...adminOnly, async (req, res
       res.status(409).json({
         error: "Este usuário pertence a outras organizações. Envie a redefinição por e-mail.",
       });
+      return;
+    }
+    if (mode === "password") {
+      // Define a senha direto: a que o admin digitou ou, se vier vazia, uma temporária (mostrada UMA vez).
+      const typed = req.body?.password;
+      const generated = typed === undefined || typed === null || typed === "";
+      if (!generated && (typeof typed !== "string" || typed.length < 8 || typed.length > 200)) {
+        res.status(400).json({ error: "A senha deve ter de 8 a 200 caracteres" });
+        return;
+      }
+      const password = generated ? generateTempPassword() : (typed as string);
+      try {
+        await getAuthProvider().setPassword(member.auth_id, password);
+      } catch (err) {
+        if (err instanceof AuthProviderError && err.code === "weak_password") {
+          res.status(400).json({ error: "Senha fraca demais. Escolha outra." });
+          return;
+        }
+        throw err;
+      }
+      // Derruba as sessões da pessoa (a do próprio admin, se for ele, continua).
+      await db.query("DELETE FROM sessions WHERE user_id = $1 AND id <> $2", [userId, currentSessionId(req) ?? ""]);
+      res.json({ changed: true, ...(generated ? { password } : {}) });
       return;
     }
     const link = await getAuthProvider().generateRecoveryLink(member.email, redirectTo);

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, type InviteInfo, type Session } from './api'
+import Icon from './Icon'
 import PasswordInput from './PasswordInput'
 import LandingPage, { PublicLayout } from './LandingPage'
 import ApiPage from './ApiPage'
@@ -8,6 +9,7 @@ import { go, routeFromHash, type PublicRoute } from './routes'
 import './App.css'
 import './layout.css'
 import './ux.css'
+import './public.css'
 import { Alert, Loading, toast } from './feedback'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
@@ -39,11 +41,28 @@ function readEntry(): Entry {
 
 function Page({ title, children, onSubmit }: { title: string; children: React.ReactNode; onSubmit?: (e: FormEvent) => void }) {
   return (
-    <form className="card auth" onSubmit={onSubmit}>
-      <div className="brand">Ethos</div>
-      <h2>{title}</h2>
-      {children}
-    </form>
+    <div className="auth-split route-enter">
+      <aside className="auth-aside" aria-hidden="true">
+        <span className="blob b1" />
+        <span className="blob b2" />
+        <div className="aside-inner">
+          <div className="brand">Ethos</div>
+          <h2>Sua administração, organizada e transparente.</h2>
+          <ul>
+            <li><Icon name="shield" /> Dados de cada organização sempre separados</li>
+            <li><Icon name="wallet" /> Cobranças, recibos e repasses num só lugar</li>
+            <li><Icon name="history" /> Registro de tudo o que acontece no sistema</li>
+          </ul>
+        </div>
+      </aside>
+      <div className="auth-main">
+        <form className="card auth auth-card" onSubmit={onSubmit} key={title}>
+          <div className="brand auth-brand">Ethos</div>
+          <h2>{title}</h2>
+          {children}
+        </form>
+      </div>
+    </div>
   )
 }
 
