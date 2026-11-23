@@ -2,16 +2,14 @@ import express, { type ErrorRequestHandler } from "express";
 import path from "node:path";
 import fs from "node:fs";
 import { db, transaction, isUniqueViolation, type Role } from "./db.js";
-import {
-  createSession,
-  destroySession,
-  hashPassword,
-  loadAuth,
-  requireAuth,
-  requireRole,
-  verifyPassword,
-} from "./auth.js";
+import { createSession, currentSessionId, destroySession, loadAuth, requireAuth, requireRole } from "./auth.js";
+import { AuthProviderError, appUrl, getAuthProvider } from "./authProvider.js";
 import { crudRouter, parseId, type Field } from "./crud.js";
+import { RateLimiter } from "./ratelimit.js";
+import { teamRouter } from "./team.js";
+
+const MIN_PASSWORD = 8;
+const MAX_PASSWORD = 200;
 
 const PROPERTY_TYPES = ["casa", "apartamento", "terreno", "comercial", "outro"] as const;
 const UNIT_STATUS = ["disponivel", "ocupada", "manutencao"] as const;
@@ -29,6 +27,12 @@ export function createApp() {
   app.use(express.json({ limit: "100kb" }));
   app.use(loadAuth);
 
+  // Limites contra força bruta e abuso de e-mails (em memória, por instância).
+  const loginLimiter = new RateLimiter(10, 15 * 60 * 1000);
+  const forgotLimiter = new RateLimiter(5, 60 * 60 * 1000);
+  const registerLimiter = new RateLimiter(Number(process.env.REGISTER_RATE_MAX ?? 10), 60 * 60 * 1000);
+  const resetLimiter = new RateLimiter(10, 15 * 60 * 1000);
+
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", service: "ethos" });
   });
@@ -41,24 +45,37 @@ export function createApp() {
       return;
     }
     const cleanEmail = email.trim().toLowerCase();
-    if (!name.trim() || !/^\S+@\S+\.\S+$/.test(cleanEmail) || password.length < 8 || password.length > 200) {
+    if (
+      !name.trim() ||
+      !/^\S+@\S+\.\S+$/.test(cleanEmail) ||
+      cleanEmail.length > 200 ||
+      password.length < MIN_PASSWORD ||
+      password.length > MAX_PASSWORD
+    ) {
       res.status(400).json({ error: "Informe nome, e-mail válido e senha com 8+ caracteres" });
+      return;
+    }
+    if (!registerLimiter.allow(`register:${req.ip}`)) {
+      res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
       return;
     }
     const orgName =
       typeof organizationName === "string" && organizationName.trim()
         ? organizationName.trim().slice(0, 200)
         : name.trim();
+    const provider = getAuthProvider();
     // Cadastro público cria uma nova organização e o usuário vira seu administrador.
+    let authId: string | undefined;
     let created: { userId: number; orgId: number };
     try {
+      authId = (await provider.createUser(cleanEmail, password)).id;
       created = await transaction(async (tx) => {
         const [org] = await tx.query<{ id: number }>("INSERT INTO organizations (name) VALUES ($1) RETURNING id", [
           orgName,
         ]);
         const [user] = await tx.query<{ id: number }>(
-          "INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
-          [name.trim(), cleanEmail, hashPassword(password)],
+          "INSERT INTO users (name, email, auth_id) VALUES ($1, $2, $3) RETURNING id",
+          [name.trim().slice(0, 200), cleanEmail, authId],
         );
         await tx.query("INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1, $2, 'admin')", [
           org!.id,
@@ -67,8 +84,14 @@ export function createApp() {
         return { userId: user!.id, orgId: org!.id };
       });
     } catch (err) {
-      if (isUniqueViolation(err)) {
+      // Evita deixar uma credencial órfã no Supabase se o banco falhar.
+      if (authId) await provider.deleteUser(authId).catch(() => {});
+      if (isUniqueViolation(err) || (err instanceof AuthProviderError && err.code === "exists")) {
         res.status(409).json({ error: "E-mail já cadastrado" });
+        return;
+      }
+      if (err instanceof AuthProviderError && err.code === "weak_password") {
+        res.status(400).json({ error: "Senha fraca demais. Escolha outra." });
         return;
       }
       throw err;
@@ -87,14 +110,22 @@ export function createApp() {
       res.status(400).json({ error: "Dados inválidos" });
       return;
     }
-    const [user] = await db.query<{ id: number; name: string; email: string; password_hash: string }>(
-      "SELECT id, name, email, password_hash FROM users WHERE email = $1",
-      [email.trim().toLowerCase()],
+    const cleanEmail = email.trim().toLowerCase();
+    const limitKey = `login:${req.ip}:${cleanEmail}`;
+    if (!loginLimiter.allow(limitKey)) {
+      res.status(429).json({ error: "Muitas tentativas. Tente novamente em alguns minutos." });
+      return;
+    }
+    const [user] = await db.query<{ id: number; name: string; email: string; auth_id: string }>(
+      "SELECT id, name, email, auth_id FROM users WHERE email = $1",
+      [cleanEmail],
     );
-    if (!user || !verifyPassword(password, user.password_hash)) {
+    const verified = user ? await getAuthProvider().verifyCredentials(cleanEmail, password) : null;
+    if (!user || !verified || verified.id !== user.auth_id) {
       res.status(401).json({ error: "E-mail ou senha incorretos" });
       return;
     }
+    loginLimiter.reset(limitKey);
     const [membership] = await db.query<{ id: number; name: string; role: Role }>(
       `SELECT o.id, o.name, m.role FROM organization_members m
        JOIN organizations o ON o.id = m.organization_id
@@ -122,16 +153,91 @@ export function createApp() {
     res.json(req.auth ?? { user: null });
   });
 
-  // ---------- Organização ----------
-  app.get("/api/members", requireAuth, requireRole("admin"), async (req, res) => {
-    const members = await db.query(
-      `SELECT u.id, u.name, u.email, m.role FROM organization_members m
-       JOIN users u ON u.id = m.user_id
-       WHERE m.organization_id = $1 ORDER BY u.id`,
-      [req.auth!.organization.id],
-    );
-    res.json({ members });
+  // Recuperação de senha: o Supabase envia o e-mail com um link para o app.
+  // Resposta sempre 204 para não revelar quais e-mails existem.
+  app.post("/api/auth/forgot", async (req, res) => {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 200) {
+      res.status(400).json({ error: "Informe um e-mail válido" });
+      return;
+    }
+    if (forgotLimiter.allow(`forgot:${req.ip}:${email}`)) {
+      const known = await db.query("SELECT 1 FROM users WHERE email = $1", [email]);
+      if (known.length > 0) {
+        try {
+          await getAuthProvider().sendRecovery(email, `${appUrl()}/`);
+        } catch (err) {
+          console.error("Falha ao enviar recuperação:", err instanceof Error ? err.message : err);
+        }
+      }
+    }
+    res.status(204).end();
   });
+
+  // Define a nova senha usando o access_token do link de recuperação.
+  app.post("/api/auth/reset", async (req, res) => {
+    const { accessToken, password } = req.body ?? {};
+    if (typeof accessToken !== "string" || typeof password !== "string") {
+      res.status(400).json({ error: "Dados inválidos" });
+      return;
+    }
+    if (password.length < MIN_PASSWORD || password.length > MAX_PASSWORD) {
+      res.status(400).json({ error: "A senha deve ter 8+ caracteres" });
+      return;
+    }
+    if (!resetLimiter.allow(`reset:${req.ip}`)) {
+      res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
+      return;
+    }
+    const provider = getAuthProvider();
+    const owner = await provider.userFromRecoveryToken(accessToken);
+    if (!owner) {
+      res.status(400).json({ error: "Link inválido ou expirado. Solicite uma nova recuperação." });
+      return;
+    }
+    try {
+      await provider.setPassword(owner.id, password);
+    } catch (err) {
+      if (err instanceof AuthProviderError && err.code === "weak_password") {
+        res.status(400).json({ error: "Senha fraca demais. Escolha outra." });
+        return;
+      }
+      throw err;
+    }
+    // Quem trocou a senha por recuperação provavelmente perdeu o controle: derruba todas as sessões.
+    await db.query("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE auth_id = $1)", [owner.id]);
+    res.status(204).end();
+  });
+
+  // ---------- Organizações do usuário ----------
+  app.get("/api/auth/organizations", requireAuth, async (req, res) => {
+    const organizations = await db.query(
+      `SELECT o.id, o.name, m.role FROM organization_members m
+       JOIN organizations o ON o.id = m.organization_id
+       WHERE m.user_id = $1 ORDER BY o.name`,
+      [req.auth!.user.id],
+    );
+    res.json({ organizations });
+  });
+
+  app.post("/api/auth/switch", requireAuth, async (req, res) => {
+    const organizationId = parseId(req.body?.organizationId);
+    const [member] = organizationId
+      ? await db.query("SELECT 1 FROM organization_members WHERE user_id = $1 AND organization_id = $2", [
+          req.auth!.user.id,
+          organizationId,
+        ])
+      : [];
+    if (!member) {
+      res.status(403).json({ error: "Sem acesso a esta organização" });
+      return;
+    }
+    await db.query("UPDATE sessions SET organization_id = $1 WHERE id = $2", [organizationId, currentSessionId(req)]);
+    res.status(204).end();
+  });
+
+  // ---------- Equipe: membros, convites e redefinição pelo admin ----------
+  app.use("/api", teamRouter);
 
   // ---------- Domínio ----------
   app.use("/api/owners", crudRouter({ table: "owners", fields: personFields, orderBy: "name" }));

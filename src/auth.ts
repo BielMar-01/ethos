@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { db, type AuthContext, type Role } from "./db.js";
-// loadAuth é async: o Express 5 encaminha rejeições ao tratador de erros.
 
 const SESSION_COOKIE = "ethos_sid";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -40,6 +39,10 @@ export async function destroySession(req: Request, res: Response): Promise<void>
   const id = readCookie(req, SESSION_COOKIE);
   if (id) await db.query("DELETE FROM sessions WHERE id = $1", [id]);
   res.clearCookie(SESSION_COOKIE);
+}
+
+export function currentSessionId(req: Request): string | undefined {
+  return readCookie(req, SESSION_COOKIE);
 }
 
 function readCookie(req: Request, name: string): string | undefined {

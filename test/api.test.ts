@@ -1,5 +1,6 @@
 // Postgres em memória (PGlite): os testes nunca tocam o banco real.
 process.env.ETHOS_DB = "memory";
+process.env.REGISTER_RATE_MAX = "1000";
 
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
