@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { api, ROLE_LABELS, type Invitation, type Member, type Role } from './api'
+import { api, ROLE_LABELS, type Invitation, type Item, type Member, type Role } from './api'
 
 const ROLES = Object.keys(ROLE_LABELS) as Role[]
 
@@ -14,12 +14,17 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
   const [link, setLink] = useState<{ label: string; url: string } | null>(null)
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('colaborador')
+  const [tenants, setTenants] = useState<Item[]>([])
+  const [owners, setOwners] = useState<Item[]>([])
+  const [linkId, setLinkId] = useState('')
 
   const load = useCallback(async () => {
     try {
-      const [m, i] = await Promise.all([api.members(), api.invitations()])
+      const [m, i, t, o] = await Promise.all([api.members(), api.invitations(), api.list('tenants'), api.list('owners')])
       setMembers(m.members)
       setInvitations(i.invitations)
+      setTenants(t.items)
+      setOwners(o.items)
     } catch (e) {
       setError(message(e))
     } finally {
@@ -44,9 +49,12 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
   const invite = (e: FormEvent) => {
     e.preventDefault()
     return run(async () => {
-      const r = await api.createInvitation(email, role)
+      const linkBody =
+        role === 'inquilino' ? { tenantId: Number(linkId) } : role === 'proprietario' ? { ownerId: Number(linkId) } : undefined
+      const r = await api.createInvitation(email, role, linkBody)
       setLink({ label: `Convite para ${r.invitation.email}`, url: r.link })
       setEmail('')
+      setLinkId('')
       await load()
     })
   }
@@ -125,7 +133,13 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
         </label>
         <label>
           Papel
-          <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
+          <select
+            value={role}
+            onChange={(e) => {
+              setRole(e.target.value as Role)
+              setLinkId('')
+            }}
+          >
             {ROLES.map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABELS[r]}
@@ -133,6 +147,24 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
             ))}
           </select>
         </label>
+        {(role === 'inquilino' || role === 'proprietario') && (
+          <label>
+            {role === 'inquilino' ? 'Cadastro do inquilino' : 'Cadastro do proprietário'}
+            <select value={linkId} onChange={(e) => setLinkId(e.target.value)} required>
+              <option value="">Selecione quem é</option>
+              {(role === 'inquilino' ? tenants : owners).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {String(p.name)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <p className="muted small span-all">
+          {role === 'inquilino' || role === 'proprietario'
+            ? 'Clientes acessam a área do cliente e enxergam apenas os dados ligados a este cadastro.'
+            : 'Administradores e colaboradores acessam o painel da organização.'}
+        </p>
         <div className="actions">
           <button type="submit" className="primary">
             Gerar convite
@@ -161,17 +193,25 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
                     <td>{m.name}</td>
                     <td>{m.email}</td>
                     <td>
-                      <select
-                        aria-label={`Papel de ${m.name}`}
-                        value={m.role}
-                        onChange={(e) => changeRole(m, e.target.value as Role)}
-                      >
-                        {ROLES.map((r) => (
-                          <option key={r} value={r}>
-                            {ROLE_LABELS[r]}
-                          </option>
-                        ))}
-                      </select>
+                      {m.role === 'inquilino' || m.role === 'proprietario' ? (
+                        // Clientes têm vínculo com um cadastro: para mudar, remova e convide de novo.
+                        <span>
+                          {ROLE_LABELS[m.role]}
+                          {m.linked_name ? <span className="muted"> · {m.linked_name}</span> : <span className="error"> · sem vínculo</span>}
+                        </span>
+                      ) : (
+                        <select
+                          aria-label={`Papel de ${m.name}`}
+                          value={m.role}
+                          onChange={(e) => changeRole(m, e.target.value as Role)}
+                        >
+                          {(['admin', 'colaborador'] as Role[]).map((r) => (
+                            <option key={r} value={r}>
+                              {ROLE_LABELS[r]}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </td>
                     <td className="row-actions">
                       <button onClick={() => resetByEmail(m)}>Redefinir senha (e-mail)</button>

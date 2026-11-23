@@ -62,7 +62,7 @@ interface ChargeRow {
   status: string;
 }
 
-const CHARGE_SELECT = `
+export const CHARGE_SELECT = `
   SELECT c.id, c.lease_id, c.kind, c.description, c.competence, c.due_date, c.amount_cents, c.cancelled_at,
          ${PAID} AS paid_cents, ${STATUS} AS status,
          u.identifier AS unit_identifier, pr.name AS property_name, ${TENANT_NAMES} AS tenant_names

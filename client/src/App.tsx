@@ -2,8 +2,10 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { api, type InviteInfo, type Session } from './api'
 import PasswordInput from './PasswordInput'
 import ResourcePage from './ResourcePage'
+import ApiPage from './ApiPage'
 import FinancePage from './FinancePage'
 import LeasesPage from './LeasesPage'
+import PortalPage from './PortalPage'
 import TeamPage from './TeamPage'
 import TemplatesPage from './TemplatesPage'
 import { RESOURCES } from './resources'
@@ -247,6 +249,7 @@ const STAFF = ['admin', 'colaborador']
 const TEAM = 'team'
 const LEASES = 'leases'
 const FINANCE = 'finance'
+const API = 'api'
 const TEMPLATES = 'templates'
 
 function Shell({ session, onLogout, onSession }: { session: Session; onLogout: () => void; onSession: (s: Session) => void }) {
@@ -254,6 +257,7 @@ function Shell({ session, onLogout, onSession }: { session: Session; onLogout: (
   const [orgs, setOrgs] = useState<{ id: number; name: string }[]>([])
   const isStaff = STAFF.includes(session.role)
   const isAdmin = session.role === 'admin'
+  const isClient = session.role === 'inquilino' || session.role === 'proprietario'
   const def = RESOURCES.find((r) => r.key === current)
 
   useEffect(() => {
@@ -290,6 +294,9 @@ function Shell({ session, onLogout, onSession }: { session: Session; onLogout: (
               </button>
               <button className={current === TEMPLATES ? 'nav active' : 'nav'} onClick={() => setCurrent(TEMPLATES)}>
                 Modelos
+              </button>
+              <button className={current === API ? 'nav active' : 'nav'} onClick={() => setCurrent(API)}>
+                API
               </button>
             </>
           )}
@@ -332,8 +339,12 @@ function Shell({ session, onLogout, onSession }: { session: Session; onLogout: (
             <FinancePage key={`finance-${session.organization.id}`} isAdmin={isAdmin} />
           ) : current === TEMPLATES && isStaff ? (
             <TemplatesPage key={`templates-${session.organization.id}`} canDelete={isAdmin} />
+          ) : current === API && isStaff ? (
+            <ApiPage key={`api-${session.organization.id}`} isAdmin={isAdmin} />
           ) : isStaff && def ? (
             <ResourcePage key={`${def.key}-${session.organization.id}`} def={def} canDelete={isAdmin} />
+          ) : isClient ? (
+            <PortalPage key={`portal-${session.organization.id}`} role={session.role} />
           ) : (
             <p className="empty">Seu perfil ({session.role}) ainda não tem telas disponíveis.</p>
           )}

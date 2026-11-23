@@ -66,8 +66,8 @@ const pay = (c: Client, leaseId: number, allocations: { charge_id: number; amoun
   });
 
 /** Convida um membro com o papel dado e devolve o cliente logado como ele. */
-async function memberClient(admin: Client, email: string, role: string): Promise<Client> {
-  const inv = await admin.call("POST", "/api/invitations", { email, role });
+async function memberClient(admin: Client, email: string, role: string, extra: Record<string, unknown> = {}): Promise<Client> {
+  const inv = await admin.call("POST", "/api/invitations", { email, role, ...extra });
   const token = new URL(inv.body.link).searchParams.get("invite");
   const c = new Client(base);
   const r = await c.call("POST", `/api/invitations/by-token/${token}/accept`, { name: "Membro", password: "senha-segura-123" });
@@ -260,7 +260,8 @@ describe("pagamentos e baixas", () => {
   it("colaborador registra pagamento; papel inquilino não acessa o financeiro", async () => {
     const a = await register(base, "p6@x.com", "P6");
     const col = await memberClient(a, "p6col@x.com", "colaborador");
-    const tenantUser = await memberClient(a, "p6inq@x.com", "inquilino");
+    const linked = (await a.call("POST", "/api/tenants", { name: "Portal", document: "777" })).body.item;
+    const tenantUser = await memberClient(a, "p6inq@x.com", "inquilino", { tenantId: linked.id });
     const s = await setup(a, "14");
     await generate(a, PAST);
     const [charge] = await charges(col, PAST);

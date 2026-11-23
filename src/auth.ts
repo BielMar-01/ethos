@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { db, type AuthContext, type Role } from "./db.js";
+import { RateLimiter } from "./ratelimit.js";
 
-const SESSION_COOKIE = "ethos_sid";
+export const SESSION_COOKIE = "ethos_sid";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function hashPassword(password: string): string {
@@ -69,14 +70,64 @@ interface SessionRow {
   organization_id: number;
   organization_name: string;
   role: Role;
+  tenant_id: number | null;
+  owner_id: number | null;
 }
 
-export async function loadAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
+export const hashApiKey = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
+
+const API_KEY_RE = /^Bearer (ethos_[A-Za-z0-9_-]{20,})$/;
+const apiKeyLimiter = new RateLimiter(600, 60 * 1000); // 600 req/min por chave
+
+/**
+ * Identifica o chamador. `Authorization: Bearer ethos_...` (chave de API) tem precedência sobre o
+ * cookie. Chaves são SOMENTE LEITURA e agem como colaborador da organização que as criou.
+ */
+export async function loadAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const header = req.headers.authorization;
+  if (header?.startsWith("Bearer ethos_")) {
+    const token = API_KEY_RE.exec(header)?.[1];
+    const [key] = token
+      ? await db.query<{ id: number; name: string; organization_id: number; organization_name: string }>(
+          `SELECT k.id, k.name, k.organization_id, o.name AS organization_name
+           FROM api_keys k JOIN organizations o ON o.id = k.organization_id
+           WHERE k.token_hash = $1 AND k.revoked_at IS NULL`,
+          [hashApiKey(token)],
+        )
+      : [];
+    if (!key) {
+      res.status(401).json({ error: "Chave de API inválida ou revogada" });
+      return;
+    }
+    if (!apiKeyLimiter.allow(`key:${key.id}`)) {
+      res.status(429).json({ error: "Limite de requisições da chave excedido (600/min)" });
+      return;
+    }
+    if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+      res.status(403).json({ error: "Chaves de API são somente leitura" });
+      return;
+    }
+    await db.query(
+      "UPDATE api_keys SET last_used_at = now() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')",
+      [key.id],
+    );
+    req.auth = {
+      user: { id: 0, name: `API: ${key.name}`, email: "" },
+      organization: { id: key.organization_id, name: key.organization_name },
+      role: "colaborador",
+      tenantId: null,
+      ownerId: null,
+      viaApiKey: true,
+    };
+    next();
+    return;
+  }
+
   const id = readCookie(req, SESSION_COOKIE);
   if (id) {
     const [row] = await db.query<SessionRow>(
       `SELECT u.id AS user_id, u.name AS user_name, u.email,
-              o.id AS organization_id, o.name AS organization_name, m.role
+              o.id AS organization_id, o.name AS organization_name, m.role, m.tenant_id, m.owner_id
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        JOIN organizations o ON o.id = s.organization_id
@@ -89,6 +140,8 @@ export async function loadAuth(req: Request, _res: Response, next: NextFunction)
         user: { id: row.user_id, name: row.user_name, email: row.email },
         organization: { id: row.organization_id, name: row.organization_name },
         role: row.role,
+        tenantId: row.tenant_id,
+        ownerId: row.owner_id,
       };
     }
   }

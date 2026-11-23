@@ -11,7 +11,9 @@
     "dev:server": "tsx watch src/server.ts",
     "dev:client": "npm --prefix client run dev",
     "db:migrate": "tsx src/migrate.ts",
-    "user:reset-password": "tsx src/cli/resetPassword.ts"
+    "user:reset-password": "tsx src/cli/resetPassword.ts",
+    "seed:demo": "tsx src/cli/seedDemo.ts",
+    "demo": "tsx src/cli/demoServer.ts"
   },
   "keywords": [],
   "author": "",

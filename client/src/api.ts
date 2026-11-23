@@ -19,6 +19,9 @@ export interface Member {
   name: string
   email: string
   role: Role
+  tenant_id: number | null
+  owner_id: number | null
+  linked_name: string | null
 }
 
 export interface Invitation {
@@ -27,6 +30,92 @@ export interface Invitation {
   role: Role
   expires_at: string
   created_at: string
+  tenant_id: number | null
+  owner_id: number | null
+}
+
+export interface ApiKey {
+  id: number
+  name: string
+  prefix: string
+  created_at: string
+  last_used_at: string | null
+  revoked_at: string | null
+}
+
+export interface PortalMe {
+  kind: 'tenant' | 'owner'
+  linked: boolean
+  name: string | null
+}
+
+export interface PortalLease {
+  id: number
+  status: LeaseStatus
+  start_date: string
+  end_date: string
+  rent_cents: number
+  due_day: number
+  guarantee: string | null
+  unit_identifier: string
+  property_name: string
+  street: string | null
+  number: string | null
+  neighborhood: string | null
+  city: string | null
+  state: string | null
+}
+
+export interface PortalCharge {
+  id: number
+  description: string
+  due_date: string
+  amount_cents: number
+  paid_cents: number
+  status: ChargeStatus
+}
+
+export interface PortalPayment {
+  id: number
+  received_at: string
+  amount_cents: number
+  method: string
+  receipt_number: number
+  voided_at: string | null
+}
+
+export interface PortalProperty {
+  id: number
+  name: string
+  type: string
+  city: string | null
+  state: string | null
+  units_total: number
+  units_occupied: number
+}
+
+export interface PortalUnit {
+  id: number
+  identifier: string
+  status: string
+  property_name: string
+  rent_cents: number | null
+  tenant_names: string | null
+  end_date: string | null
+}
+
+export interface OpenApiDoc {
+  info: { title: string; version: string; description: string }
+  servers: { url: string }[]
+  paths: Record<string, Record<string, {
+    tags: string[]
+    summary: string
+    description: string
+    security: Record<string, string[]>[]
+    parameters: { name: string; in: string; description?: string; example?: string | number }[]
+    requestBody?: { content: { 'application/json': { example: unknown } } }
+    responses: Record<string, { description: string; content?: { 'application/json': { example: unknown } } }>
+  }>>
 }
 
 export interface InviteInfo {
@@ -253,6 +342,27 @@ export const api = {
   saveFinanceSettings: (admin_fee_bps: number) =>
     request<{ admin_fee_bps: number }>('/api/settings/finance', json('PUT', { admin_fee_bps })),
 
+  // Área do cliente
+  portalMe: () => request<PortalMe>('/api/portal/me'),
+  portalLeases: () => request<{ items: PortalLease[] }>('/api/portal/tenant/leases'),
+  portalCharges: () => request<{ items: PortalCharge[] }>('/api/portal/tenant/charges'),
+  portalPayments: () => request<{ items: PortalPayment[] }>('/api/portal/tenant/payments'),
+  portalReceipt: (id: number) =>
+    request<{ payment: { receipt_number: number; receipt_content: string; voided_at: string | null; void_reason: string | null } }>(
+      `/api/portal/tenant/payments/${id}`,
+    ),
+  portalDocuments: () => request<{ items: DocSummary[] }>('/api/portal/tenant/documents'),
+  portalDocument: (id: number) => request<{ document: DocFull }>(`/api/portal/tenant/documents/${id}`),
+  ownerProperties: () => request<{ items: PortalProperty[] }>('/api/portal/owner/properties'),
+  ownerUnits: () => request<{ items: PortalUnit[] }>('/api/portal/owner/units'),
+  ownerTransfers: () => request<{ items: Omit<Transfer, 'owner_id' | 'owner_name'>[] }>('/api/portal/owner/transfers'),
+
+  // API pública e chaves
+  openapi: () => request<OpenApiDoc>('/api/openapi.json'),
+  apiKeys: () => request<{ items: ApiKey[] }>('/api/api-keys'),
+  createApiKey: (name: string) => request<{ item: ApiKey; token: string }>('/api/api-keys', json('POST', { name })),
+  revokeApiKey: (id: number) => request<void>(`/api/api-keys/${id}`, { method: 'DELETE' }),
+
   // Equipe (admin)
   members: () => request<{ members: Member[] }>('/api/members'),
   setMemberRole: (id: number, role: Role) => request<unknown>(`/api/members/${id}`, json('PATCH', { role })),
@@ -260,8 +370,8 @@ export const api = {
   memberPasswordReset: (id: number, mode: 'email' | 'link') =>
     request<{ sent?: boolean; link?: string }>(`/api/members/${id}/password-reset`, json('POST', { mode })),
   invitations: () => request<{ invitations: Invitation[] }>('/api/invitations'),
-  createInvitation: (email: string, role: Role) =>
-    request<{ invitation: Invitation; link: string }>('/api/invitations', json('POST', { email, role })),
+  createInvitation: (email: string, role: Role, link?: { tenantId?: number; ownerId?: number }) =>
+    request<{ invitation: Invitation; link: string }>('/api/invitations', json('POST', { email, role, ...link })),
   revokeInvitation: (id: number) => request<void>(`/api/invitations/${id}`, { method: 'DELETE' }),
   list: (resource: string) => request<{ items: Item[] }>(`/api/${resource}`),
   create: (resource: string, body: Record<string, unknown>) =>

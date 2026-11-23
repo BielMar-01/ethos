@@ -23,6 +23,11 @@ export interface AuthContext {
   user: User;
   organization: { id: number; name: string };
   role: Role;
+  /** Cadastro de inquilino/proprietário ao qual este acesso está vinculado (área do cliente). */
+  tenantId: number | null;
+  ownerId: number | null;
+  /** Autenticado por chave de API (somente leitura). */
+  viaApiKey?: boolean;
 }
 
 /** Interface mínima comum ao pool (produção) e ao PGlite (testes). */

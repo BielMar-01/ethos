@@ -8,6 +8,9 @@ import { crudRouter, parseId, type Field } from "./crud.js";
 import { RateLimiter } from "./ratelimit.js";
 import { teamRouter } from "./team.js";
 import { contractsRouter } from "./contracts.js";
+import { portalRouter } from "./portal.js";
+import { apiKeysRouter } from "./apikeys.js";
+import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
 
 const MIN_PASSWORD = 8;
@@ -246,6 +249,13 @@ export function createApp() {
 
   // ---------- Financeiro ----------
   app.use("/api", financeRouter);
+
+  // ---------- Área do cliente, chaves de API e documentação ----------
+  app.use("/api", portalRouter);
+  app.use("/api", apiKeysRouter);
+  app.get("/api/openapi.json", (req, res) => {
+    res.json(buildOpenApi(`${req.protocol}://${req.get("host")}`));
+  });
 
   // ---------- Domínio ----------
   app.use("/api/owners", crudRouter({ table: "owners", fields: personFields, orderBy: "name" }));

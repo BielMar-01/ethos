@@ -13,8 +13,8 @@ after(async () => {
 });
 
 /** Cria um convite como admin e devolve o token. */
-async function invite(admin: Client, email: string, role = "colaborador") {
-  const r = await admin.call("POST", "/api/invitations", { email, role });
+async function invite(admin: Client, email: string, role = "colaborador", extra: Record<string, unknown> = {}) {
+  const r = await admin.call("POST", "/api/invitations", { email, role, ...extra });
   assert.equal(r.status, 201, JSON.stringify(r.body));
   return { token: tokenFrom(r.body.link), link: r.body.link as string, id: r.body.invitation.id as number };
 }
@@ -79,7 +79,8 @@ describe("convites", () => {
   it("reenviar substitui o convite anterior; revogar invalida o link", async () => {
     const admin = await register(base, "re-admin@x.com", "Re");
     const first = await invite(admin, "re@x.com");
-    const second = await invite(admin, "re@x.com", "inquilino");
+    const tenant = (await admin.call("POST", "/api/tenants", { name: "T", document: "1" })).body.item;
+    const second = await invite(admin, "re@x.com", "inquilino", { tenantId: tenant.id });
     assert.notEqual(first.token, second.token);
     assert.equal((await new Client(base).call("GET", `/api/invitations/by-token/${first.token}`)).status, 404);
     assert.equal((await admin.call("GET", "/api/invitations")).body.invitations.length, 1);

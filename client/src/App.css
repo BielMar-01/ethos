@@ -174,3 +174,20 @@ legend { color: var(--muted); font-size: 0.85rem; padding: 0 0.3rem; }
 .badge-c-paga { color: #3fb27f; }
 .badge-c-cancelada { color: var(--muted); text-decoration: line-through; }
 tr.voided td { opacity: 0.55; }
+
+/* ---- API e área do cliente ---- */
+code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.85em; }
+.code { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem 0.9rem; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.8rem; margin: 0.4rem 0; white-space: pre; }
+.button-link { padding: 0.5rem 0.9rem; border: 1px solid var(--border); border-radius: 8px; color: var(--text); text-decoration: none; }
+.button-link:hover { border-color: var(--accent); }
+.endpoints details { border-bottom: 1px solid var(--border); padding: 0.55rem 0; }
+.endpoints details:last-child { border-bottom: none; }
+.endpoints summary { cursor: pointer; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.endpoint-body { padding: 0.6rem 0 0.3rem 0.2rem; }
+.method { display: inline-block; min-width: 3.6rem; text-align: center; padding: 0.1rem 0.4rem; border-radius: 6px; font-size: 0.72rem; font-weight: 700; border: 1px solid currentColor; }
+.method-get { color: #5b9bd5; }
+.method-post { color: #3fb27f; }
+.method-put, .method-patch { color: #d9a441; }
+.method-delete { color: var(--danger); }
+.key-badge { font-size: 0.68rem; }
+.key-once { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.8rem; border: 1px solid var(--accent); border-radius: 8px; }

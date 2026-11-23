@@ -20,13 +20,39 @@ const adminOnly = [requireAuth, requireRole("admin")];
 
 teamRouter.get("/members", ...adminOnly, async (req, res) => {
   const members = await db.query(
-    `SELECT u.id, u.name, u.email, m.role FROM organization_members m
+    `SELECT u.id, u.name, u.email, m.role, m.tenant_id, m.owner_id,
+            COALESCE(t.name, o.name) AS linked_name
+     FROM organization_members m
      JOIN users u ON u.id = m.user_id
+     LEFT JOIN tenants t ON t.id = m.tenant_id
+     LEFT JOIN owners o ON o.id = m.owner_id
      WHERE m.organization_id = $1 ORDER BY u.id`,
     [req.auth!.organization.id],
   );
   res.json({ members });
 });
+
+/**
+ * Papéis da área do cliente só enxergam dados pelo vínculo com o cadastro:
+ * inquilino → tenantId, proprietário → ownerId (ambos da MESMA organização).
+ */
+async function resolveLink(
+  orgId: number,
+  role: Role,
+  body: { tenantId?: unknown; ownerId?: unknown },
+): Promise<{ tenantId: number | null; ownerId: number | null } | { error: string }> {
+  if (role === "inquilino") {
+    const id = parseId(body.tenantId);
+    const found = id ? await db.query("SELECT 1 FROM tenants WHERE id = $1 AND organization_id = $2", [id, orgId]) : [];
+    return found.length ? { tenantId: id!, ownerId: null } : { error: "Para o papel inquilino, informe tenantId (cadastro de inquilino da organização)" };
+  }
+  if (role === "proprietario") {
+    const id = parseId(body.ownerId);
+    const found = id ? await db.query("SELECT 1 FROM owners WHERE id = $1 AND organization_id = $2", [id, orgId]) : [];
+    return found.length ? { tenantId: null, ownerId: id! } : { error: "Para o papel proprietário, informe ownerId (cadastro de proprietário da organização)" };
+  }
+  return { tenantId: null, ownerId: null };
+}
 
 /** Quantos administradores a organização tem (para nunca ficar sem nenhum). */
 async function adminCount(orgId: number): Promise<number> {
@@ -59,11 +85,16 @@ teamRouter.patch("/members/:userId", ...adminOnly, async (req, res) => {
     res.status(409).json({ error: "A organização precisa ter pelo menos um administrador" });
     return;
   }
-  await db.query("UPDATE organization_members SET role = $1 WHERE organization_id = $2 AND user_id = $3", [
-    role,
-    orgId,
-    userId,
-  ]);
+  const link = await resolveLink(orgId, role as Role, req.body ?? {});
+  if ("error" in link) {
+    res.status(400).json({ error: link.error });
+    return;
+  }
+  // Ao mudar o papel o vínculo anterior é substituído (a restrição do banco exige coerência).
+  await db.query(
+    "UPDATE organization_members SET role = $1, tenant_id = $4, owner_id = $5 WHERE organization_id = $2 AND user_id = $3",
+    [role, orgId, userId, link.tenantId, link.ownerId],
+  );
   res.json({ id: userId, role });
 });
 
@@ -152,7 +183,7 @@ teamRouter.post("/members/:userId/password-reset", ...adminOnly, async (req, res
 
 teamRouter.get("/invitations", ...adminOnly, async (req, res) => {
   const invitations = await db.query(
-    `SELECT id, email, role, expires_at, created_at FROM invitations
+    `SELECT id, email, role, expires_at, created_at, tenant_id, owner_id FROM invitations
      WHERE organization_id = $1 AND accepted_at IS NULL ORDER BY id DESC`,
     [req.auth!.organization.id],
   );
@@ -165,6 +196,11 @@ teamRouter.post("/invitations", ...adminOnly, async (req, res) => {
   const role = req.body?.role;
   if (!EMAIL_RE.test(email) || email.length > 200 || typeof role !== "string" || !ROLES.includes(role as Role)) {
     res.status(400).json({ error: "Informe e-mail válido e papel" });
+    return;
+  }
+  const link = await resolveLink(orgId, role as Role, req.body ?? {});
+  if ("error" in link) {
+    res.status(400).json({ error: link.error });
     return;
   }
   const already = await db.query(
@@ -184,9 +220,9 @@ teamRouter.post("/invitations", ...adminOnly, async (req, res) => {
       email,
     ]);
     return tx.query(
-      `INSERT INTO invitations (organization_id, email, role, token_hash, invited_by, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, role, expires_at, created_at`,
-      [orgId, email, role, hashToken(token), req.auth!.user.id, new Date(Date.now() + INVITE_TTL_MS)],
+      `INSERT INTO invitations (organization_id, email, role, token_hash, invited_by, expires_at, tenant_id, owner_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, email, role, expires_at, created_at, tenant_id, owner_id`,
+      [orgId, email, role, hashToken(token), req.auth!.user.id, new Date(Date.now() + INVITE_TTL_MS), link.tenantId, link.ownerId],
     );
   });
   res.status(201).json({ invitation, link: `${appUrl()}/?invite=${token}` });
@@ -215,11 +251,13 @@ interface InviteRow {
   organization_name: string;
   email: string;
   role: Role;
+  tenant_id: number | null;
+  owner_id: number | null;
 }
 
 async function findInvite(token: string): Promise<InviteRow | undefined> {
   const [row] = await db.query<InviteRow>(
-    `SELECT i.id, i.organization_id, o.name AS organization_name, i.email, i.role
+    `SELECT i.id, i.organization_id, o.name AS organization_name, i.email, i.role, i.tenant_id, i.owner_id
      FROM invitations i JOIN organizations o ON o.id = i.organization_id
      WHERE i.token_hash = $1 AND i.accepted_at IS NULL AND i.expires_at > now()`,
     [hashToken(token)],
@@ -304,11 +342,10 @@ teamRouter.post("/invitations/by-token/:token/accept", async (req, res) => {
         );
         uid = u!.id;
       }
-      await tx.query("INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1, $2, $3)", [
-        invite.organization_id,
-        uid,
-        invite.role,
-      ]);
+      await tx.query(
+        "INSERT INTO organization_members (organization_id, user_id, role, tenant_id, owner_id) VALUES ($1, $2, $3, $4, $5)",
+        [invite.organization_id, uid, invite.role, invite.tenant_id, invite.owner_id],
+      );
       return uid;
     });
   } catch (err) {
