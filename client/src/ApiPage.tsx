@@ -72,7 +72,7 @@ export default function ApiPage({ isAdmin }: { isAdmin: boolean }) {
       <div className="panel stack">
         <h3 style={{ margin: 0 }}>Como consumir</h3>
         <p className="muted">
-          A API é REST/JSON. Para integrações, crie uma <strong>chave de API</strong> abaixo e envie-a no cabeçalho{' '}
+          A API é REST/JSON. Para integrações, um administrador cria uma <strong>chave de API</strong> (aba API do painel) e você a envia no cabeçalho{' '}
           <code>Authorization: Bearer ethos_…</code>. As chaves são <strong>somente leitura</strong> e enxergam apenas a sua organização.
           Valores monetários são <strong>inteiros em centavos</strong>; datas são <code>AAAA-MM-DD</code>.
         </p>

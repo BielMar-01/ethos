@@ -3,6 +3,8 @@ import { api, type InviteInfo, type Session } from './api'
 import PasswordInput from './PasswordInput'
 import ResourcePage from './ResourcePage'
 import ApiPage from './ApiPage'
+import LandingPage, { PublicLayout } from './LandingPage'
+import { go, routeFromHash, type PublicRoute } from './routes'
 import FinancePage from './FinancePage'
 import InspectionsPage from './InspectionsPage'
 import MaintenancePage from './MaintenancePage'
@@ -50,8 +52,8 @@ function Page({ title, children, onSubmit }: { title: string; children: React.Re
   )
 }
 
-function AuthForm({ onAuth, notice }: { onAuth: (s: Session) => void; notice?: string }) {
-  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login')
+function AuthForm({ onAuth, notice, initialMode = 'login' }: { onAuth: (s: Session) => void; notice?: string; initialMode?: 'login' | 'register' }) {
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>(initialMode)
   const [name, setName] = useState('')
   const [organization, setOrganization] = useState('')
   const [email, setEmail] = useState('')
@@ -60,7 +62,7 @@ function AuthForm({ onAuth, notice }: { onAuth: (s: Session) => void; notice?: s
   const [info, setInfo] = useState(notice ?? '')
   const [busy, setBusy] = useState(false)
 
-  function go(next: typeof mode) {
+  function switchMode(next: typeof mode) {
     setError('')
     setInfo('')
     setMode(next)
@@ -125,12 +127,15 @@ function AuthForm({ onAuth, notice }: { onAuth: (s: Session) => void; notice?: s
         {mode === 'login' ? 'Entrar' : mode === 'register' ? 'Cadastrar' : 'Enviar link de recuperação'}
       </button>
       {mode === 'login' && (
-        <button type="button" className="link" onClick={() => go('forgot')}>
+        <button type="button" className="link" onClick={() => switchMode('forgot')}>
           Esqueci minha senha
         </button>
       )}
-      <button type="button" className="link" onClick={() => go(mode === 'register' ? 'login' : mode === 'login' ? 'register' : 'login')}>
+      <button type="button" className="link" onClick={() => switchMode(mode === 'register' ? 'login' : mode === 'login' ? 'register' : 'login')}>
         {mode === 'login' ? 'Não tem conta? Cadastre-se' : 'Voltar para o login'}
+      </button>
+      <button type="button" className="link" onClick={() => go('home')}>
+        ← Voltar ao início
       </button>
     </Page>
   )
@@ -373,6 +378,13 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState('')
+  const [route, setRoute] = useState<PublicRoute>(() => routeFromHash(window.location.hash))
+
+  useEffect(() => {
+    const onHash = () => setRoute(routeFromHash(window.location.hash))
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
 
   useEffect(() => {
     api
@@ -381,6 +393,11 @@ export default function App() {
       .catch(() => setSession(null))
       .finally(() => setLoading(false))
   }, [])
+
+  function authenticated(s: Session) {
+    window.history.replaceState(null, '', window.location.pathname)
+    setSession(s)
+  }
 
   if (loading) return <p className="center muted">Carregando…</p>
 
@@ -392,6 +409,7 @@ export default function App() {
           setSession(null)
           setNotice('Senha alterada. Entre com a nova senha.')
           setEntry({ kind: 'none' })
+          go('login')
         }}
       />
     )
@@ -401,16 +419,30 @@ export default function App() {
       <AcceptInvite
         token={entry.token}
         onAuth={(s) => {
-          setSession(s)
+          authenticated(s)
           setEntry({ kind: 'none' })
         }}
-        onCancel={() => setEntry({ kind: 'none' })}
+        onCancel={() => {
+          setEntry({ kind: 'none' })
+          go('login')
+        }}
       />
     )
   }
   if (!session) {
-    const text = entry.kind === 'linkError' ? entry.text : notice
-    return <AuthForm onAuth={setSession} notice={text} />
+    // Link de recuperação inválido/expirado: mostra o login com o aviso.
+    if (entry.kind === 'linkError') return <AuthForm onAuth={authenticated} notice={entry.text} />
+    if (route === 'api') {
+      return (
+        <PublicLayout route="api">
+          <ApiPage isAdmin={false} />
+        </PublicLayout>
+      )
+    }
+    if (route === 'login' || route === 'register') {
+      return <AuthForm key={route} initialMode={route} onAuth={authenticated} notice={notice} />
+    }
+    return <LandingPage />
   }
   return (
     <Shell
@@ -419,6 +451,7 @@ export default function App() {
       onLogout={async () => {
         await api.logout()
         setSession(null)
+        go('home')
       }}
     />
   )

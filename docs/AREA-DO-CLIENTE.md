@@ -17,18 +17,22 @@
 | Inquilino | Dados do contrato e **documentos emitidos** | `…/tenant/leases`, `…/tenant/documents[/:id]` |
 | Proprietário | Imóveis e unidades (ocupação, locatário, aluguel, fim do contrato) | `…/owner/properties`, `…/owner/units` |
 | Proprietário | Repasses (recebido, taxa, líquido, pago/pendente) | `…/owner/transfers` |
+| Inquilino | **Solicitar manutenção** (fotos, comentários, acompanhamento, cancelar enquanto aberta) | `…/tenant/maintenance` |
+| Inquilino / Proprietário | **Vistorias concluídas**: checklist com fotos, laudo e registro de ciência | `…/inspections` |
+| Proprietário | Chamados de manutenção dos imóveis (custo só após concluir) | `…/owner/maintenance` |
 | Administrador | Convidar cliente já vinculado; ver a quem cada acesso pertence | página **Equipe** |
 | Integrador | Chaves de API **somente leitura** + documentação OpenAPI com exemplos | página **API**, `/api/openapi.json` |
 
+## Página pública (implementada)
+- A raiz do site, sem login, é uma **home** com proposta de valor, funcionalidades, como funciona, públicos, segurança, FAQ e botões de ação (`Começar agora` → cadastro, `Entrar`). Rotas por hash: `#/entrar`, `#/cadastro`, `#/api` (documentação da API também pública). Texto só promete o que existe; o que está no roteiro (boleto/Pix, comunicados, PWA) aparece como tal.
+
 ## Proposta (NÃO implementado)
-1. **Solicitação de manutenção** pelo inquilino (abrir, anexar foto, acompanhar) — depende do módulo de manutenção.
-2. **Comunicados** da administradora e preferências de notificação (e-mail/WhatsApp/push) — depende do módulo de comunicados e de consentimento (LGPD).
-3. **Segunda via de boleto / Pix copia-e-cola** — depende de integração bancária; hoje o sistema só registra o que foi recebido.
-4. **Extrato do proprietário em PDF** e relatório anual (informe de rendimentos).
-5. **PWA**: instalação, ícones, cache e push. Avaliar com cuidado o que ficar offline (dados pessoais e financeiros).
-6. **Página pública** (institucional + “entrar”) separada do painel. Hoje a raiz mostra o login.
-7. **Webhooks e escopos por chave** para a API (hoje a chave lê tudo da organização, somente leitura).
-8. **Paginação e filtros** nas listagens (hoje devolvem a lista completa).
+1. **Comunicados** da administradora e preferências de notificação (e-mail/WhatsApp/push) — depende do módulo de comunicados e de consentimento (LGPD).
+2. **Segunda via de boleto / Pix copia-e-cola** — depende de integração bancária; hoje o sistema só registra o que foi recebido.
+3. **Extrato do proprietário em PDF** e relatório anual (informe de rendimentos).
+4. **PWA**: instalação, ícones, cache e push. Avaliar com cuidado o que ficar offline (dados pessoais e financeiros).
+5. **Webhooks e escopos por chave** para a API (hoje a chave lê tudo da organização, somente leitura).
+6. **Paginação e filtros** nas listagens (hoje devolvem a lista completa).
 
 ## API para terceiros
 - Contrato em OpenAPI 3 em `GET /api/openapi.json` (público), gerado de `src/apiSpec.ts`. Um teste garante que **todo endpoint documentado existe** e que o aviso “aceita chave de API” é verdadeiro.
