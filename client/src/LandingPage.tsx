@@ -93,6 +93,7 @@ const FEATURES: { icon: IconName; title: string; text: string }[] = [
   { icon: 'camera', title: 'Vistorias', text: 'Checklist por ambiente com fotos, laudo e comparação entre entrada e saída. Depois de concluída, a vistoria não é mais alterada.' },
   { icon: 'wrench', title: 'Manutenção', text: 'Do chamado à conclusão: prioridade, responsável, orçamentos com aprovação, fotos e uma linha do tempo de tudo o que aconteceu.' },
   { icon: 'users', title: 'Área do cliente', text: 'O inquilino acompanha cobranças, recibos e contrato e abre chamados. O proprietário vê imóveis, repasses e vistorias.' },
+  { icon: 'door', title: 'Moradores e acessos', text: 'Registre quem mora na unidade (cônjuge, filhos, parentes, funcionários) e autorize visitantes e prestadores. A portaria confere pelo nome ou código e registra entradas e saídas.' },
   { icon: 'history', title: 'Registro de atividades', text: 'O administrador vê quem fez o quê, quando e de onde — logins, alterações, exclusões e acessos negados. O histórico não pode ser editado.' },
   { icon: 'code', title: 'API aberta', text: 'Documentação OpenAPI e chaves de API somente leitura para integrar a Ethos com os seus sistemas.' },
 ]
@@ -114,7 +115,7 @@ const SECURITY = [
 ]
 
 const FAQ = [
-  { q: 'A Ethos emite boleto?', a: 'Sim, pelo Asaas (que você conecta com a sua conta): um a um ou em lote, a partir das cobranças. O pagamento é registrado na Ethos, que cuida da baixa, do recibo e do repasse. Pix e baixa automática estão no roteiro.' },
+  { q: 'A Ethos emite boleto?', a: 'Sim, de dois jeitos: pelo Asaas (que você conecta com a sua conta) ou de forma manual, sem integração, registrando um boleto que você emitiu no seu banco ou gerando uma guia de cobrança (que não é um boleto bancário). Vale um a um ou em lote, a partir das cobranças. O pagamento é registrado na Ethos, que cuida da baixa, do recibo e do repasse. Pix e baixa automática estão no roteiro.' },
   { q: 'Os contratos têm validade jurídica?', a: 'Você usa o modelo aprovado pela sua administração ou pelo seu jurídico. A Ethos preenche os dados e guarda o documento emitido, mas não presume a validade de cláusulas.' },
   { q: 'Já tenho minha base em planilhas. Dá para trazer?', a: 'Dá. Você envia arquivos CSV de proprietários, inquilinos, imóveis e unidades — vários de uma vez —, confere o que será criado e só então importa. Quem já existe não é duplicado.' },
   { q: 'Como meus clientes acessam?', a: 'Pelo convite que você gera na página Equipe, já vinculado ao cadastro da pessoa. Cada um enxerga só o que é seu.' },

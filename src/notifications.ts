@@ -3,7 +3,7 @@ import { db, transaction, type Queryable } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 import { parseId } from "./crud.js";
 
-export const CATEGORIES = ["financeiro", "manutencao", "vistoria", "contrato", "comunicado"] as const;
+export const CATEGORIES = ["financeiro", "manutencao", "vistoria", "contrato", "comunicado", "acesso"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 export const CATEGORY_LABEL: Record<Category, string> = {
@@ -12,6 +12,7 @@ export const CATEGORY_LABEL: Record<Category, string> = {
   vistoria: "Vistorias",
   contrato: "Contratos",
   comunicado: "Comunicados",
+  acesso: "Portaria e visitantes",
 };
 
 export interface NotifyInput {

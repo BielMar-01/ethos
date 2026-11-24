@@ -20,6 +20,8 @@ import { apiKeysRouter } from "./apikeys.js";
 import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
 import { boletosRouter } from "./boletos.js";
+import { profileRouter } from "./profile.js";
+import { householdRouter } from "./household.js";
 import { importRouter } from "./importer.js";
 import { cepRouter } from "./cep.js";
 import { integrationsRouter } from "./integrations.js";
@@ -300,6 +302,8 @@ export function createApp() {
   // ---------- Financeiro ----------
   app.use("/api", financeRouter);
   app.use("/api", boletosRouter);
+  app.use("/api", profileRouter);
+  app.use("/api", householdRouter);
 
   // ---------- Área do cliente, chaves de API e documentação ----------
   app.use("/api", maintenanceRouter);

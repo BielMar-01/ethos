@@ -1,7 +1,7 @@
 // Notificações, comunicados e painel: tipos e chamadas à API.
 import { json, request } from './api'
 
-export type NotifCategory = 'financeiro' | 'manutencao' | 'vistoria' | 'contrato' | 'comunicado'
+export type NotifCategory = 'financeiro' | 'manutencao' | 'vistoria' | 'contrato' | 'comunicado' | 'acesso'
 
 export interface AppNotification {
   id: number

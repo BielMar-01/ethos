@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openPanel } from "./helpers";
+import { TENANT, openPanel } from "./helpers";
 
 const noHorizontalScroll = (page: import("@playwright/test").Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
@@ -65,11 +65,28 @@ test.describe("celular", () => {
 
   test("listas e formulários não estouram a largura da tela", async ({ page }) => {
     await openPanel(page);
-    for (const label of ["Proprietários", "Contratos", "Financeiro", "Manutenção", "Importar dados", "Registros"]) {
+    for (const label of ["Proprietários", "Contratos", "Financeiro", "Manutenção", "Importar dados", "Registros", "Moradores e acessos"]) {
       await page.getByRole("button", { name: /menu/i }).first().click();
       await page.getByRole("complementary", { name: "Menu principal" }).getByRole("button", { name: label, exact: true }).click();
       await expect(page.getByRole("heading", { name: new RegExp(label.split(" ")[0]!) }).first()).toBeVisible();
       expect(await noHorizontalScroll(page), `rolagem lateral em ${label}`).toBe(true);
+    }
+  });
+
+  test("meu perfil cabe no celular", async ({ page }) => {
+    await openPanel(page);
+    await page.getByRole("button", { name: /menu/i }).first().click();
+    await page.getByRole("complementary", { name: "Menu principal" }).getByRole("button", { name: /Meu perfil/ }).click();
+    await expect(page.getByRole("heading", { name: "Meu perfil" })).toBeVisible();
+    expect(await noHorizontalScroll(page), "rolagem lateral em Meu perfil").toBe(true);
+  });
+
+  test("inquilino: abas Moradores e Visitantes cabem no celular", async ({ page }) => {
+    await openPanel(page, TENANT);
+    for (const tab of ["Moradores", "Visitantes"]) {
+      await page.getByRole("tab", { name: tab }).click();
+      await expect(page.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
+      expect(await noHorizontalScroll(page), `rolagem lateral em ${tab}`).toBe(true);
     }
   });
 });

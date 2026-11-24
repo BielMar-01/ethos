@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { request } from './api'
 import type { Charge } from './api'
-import { Alert, Empty, Loading, ask, errorText, toast } from './feedback'
+import { Alert, Loading, ask, errorText, toast } from './feedback'
 import { brl, date } from './format'
+import { centsFromMoney, moneyFromCents } from './masks'
+import MaskedInput from './MaskedInput'
 import Modal from './Modal'
 
-/** Boletos pelo Asaas: emissão individual e em lote, acompanhamento e cancelamento. */
+/** Boletos: pelo Asaas (integrado) ou manuais (sem integração), individual e em lote; acompanhamento e cancelamento. */
 
 export type BoletoStatus = 'pendente' | 'vencida' | 'paga' | 'cancelada'
 export interface Boleto {
@@ -18,13 +20,17 @@ export interface Boleto {
   bank_slip_url: string | null
   identification_field: string | null
   paid_at: string | null
-  environment: 'sandbox' | 'production'
+  environment: 'sandbox' | 'production' | 'manual'
+  provider: 'asaas' | 'manual'
+  our_number: string | null
+  notes: string | null
   description: string
   unit_identifier: string
   property_name: string
   tenant_names: string
 }
 interface BoletoInfo {
+  manual?: boolean
   connected: boolean
   environment: 'sandbox' | 'production' | null
   fine_percent: number
@@ -80,6 +86,7 @@ export function BoletoDetail({ boleto, isAdmin, onClose, onChanged }: { boleto: 
   const [b, setB] = useState(boleto)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [editing, setEditing] = useState(false)
 
   async function refresh() {
     setBusy(true)
@@ -95,8 +102,24 @@ export function BoletoDetail({ boleto, isAdmin, onClose, onChanged }: { boleto: 
       setBusy(false)
     }
   }
+  const manual = b.provider === 'manual'
+  async function markPaid() {
+    if (!(await ask('Marcar este boleto como pago? Isso só registra a informação no boleto. Para dar baixa na cobrança e emitir o recibo, registre o recebimento em Pagamentos.'))) return
+    setBusy(true)
+    setError('')
+    try {
+      const r = await request<{ item: Boleto }>(`/api/boletos/${b.id}/paid`, json('POST'))
+      setB(r.item)
+      onChanged()
+      toast.success('Boleto marcado como pago. Registre o recebimento em Pagamentos.')
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
   async function cancel() {
-    if (!(await ask('Cancelar este boleto no Asaas? A cobrança continua em aberto e você pode emitir outro.'))) return
+    if (!(await ask(manual ? 'Cancelar este boleto? A cobrança continua em aberto e você pode emitir outro.' : 'Cancelar este boleto no Asaas? A cobrança continua em aberto e você pode emitir outro.'))) return
     setBusy(true)
     try {
       await request(`/api/boletos/${b.id}/cancel`, json('POST'))
@@ -109,19 +132,26 @@ export function BoletoDetail({ boleto, isAdmin, onClose, onChanged }: { boleto: 
     }
   }
 
+  if (editing) {
+    return <ManualBoletoForm boleto={b} onClose={() => setEditing(false)} onDone={(item) => { setB(item); setEditing(false); onChanged() }} />
+  }
+
   return (
     <Modal
-      title="Boleto"
+      title={manual ? 'Boleto manual' : 'Boleto'}
       subtitle={`${b.property_name} · ${b.unit_identifier}`}
       size="md"
       onClose={onClose}
       footer={
         <>
           <button onClick={onClose}>Fechar</button>
-          {isOpen(b) && <button onClick={refresh} disabled={busy}>Atualizar situação</button>}
+          {manual && b.status !== 'cancelada' && <button onClick={() => window.print()}>Imprimir guia</button>}
+          {manual && isOpen(b) && <button onClick={() => setEditing(true)} disabled={busy}>Editar</button>}
+          {manual && isOpen(b) && <button onClick={markPaid} disabled={busy}>Marcar como pago</button>}
+          {!manual && isOpen(b) && <button onClick={refresh} disabled={busy}>Atualizar situação</button>}
           {isAdmin && isOpen(b) && <button className="danger" onClick={cancel} disabled={busy}>Cancelar boleto</button>}
-          {b.invoice_url && b.status !== 'cancelada' && (
-            <a className="btn primary" href={b.invoice_url} target="_blank" rel="noopener noreferrer">Abrir boleto</a>
+          {(b.invoice_url ?? (manual ? b.bank_slip_url : null)) && b.status !== 'cancelada' && (
+            <a className="btn primary" href={(b.invoice_url ?? b.bank_slip_url)!} target="_blank" rel="noopener noreferrer">Abrir boleto</a>
           )}
         </>
       }
@@ -134,6 +164,9 @@ export function BoletoDetail({ boleto, isAdmin, onClose, onChanged }: { boleto: 
         <div><dt>Vencimento</dt><dd>{date(b.due_date)}</dd></div>
         <div><dt>Situação</dt><dd><span className={`badge badge-b-${b.status}`}>{LABEL[b.status]}</span></dd></div>
         {b.paid_at && <div><dt>Pago em</dt><dd>{date(b.paid_at)}</dd></div>}
+        <div><dt>Tipo</dt><dd>{manual ? 'Manual' : 'Asaas'}</dd></div>
+        {manual && b.our_number && <div><dt>Nosso número</dt><dd>{b.our_number}</dd></div>}
+        {manual && b.notes && <div className="wide"><dt>Observações</dt><dd>{b.notes}</dd></div>}
         {b.environment === 'sandbox' && <div className="wide"><dd className="muted small">Boleto de teste (sandbox): não tem valor real.</dd></div>}
         {b.identification_field && (
           <div className="wide">
@@ -145,14 +178,103 @@ export function BoletoDetail({ boleto, isAdmin, onClose, onChanged }: { boleto: 
           </div>
         )}
       </dl>
-      {b.status === 'paga' && <p className="muted small">O Asaas informou o pagamento. Para dar baixa na cobrança e emitir o recibo, registre o recebimento em <strong>Pagamentos</strong> (forma: boleto).</p>}
+      {b.status === 'paga' && <p className="muted small">{manual ? 'Marcado como pago pela equipe.' : 'O Asaas informou o pagamento.'} Para dar baixa na cobrança e emitir o recibo, registre o recebimento em <strong>Pagamentos</strong> (forma: boleto).</p>}
+      {manual && !b.identification_field && !b.bank_slip_url && (
+        <p className="muted small">Esta é uma <strong>guia de cobrança do Ethos</strong>: serve para informar o locatário (valor, vencimento e referência), mas <strong>não é um boleto bancário</strong> e não pode ser pago em banco.</p>
+      )}
+    </Modal>
+  )
+}
+
+// ------------------------------------------------------------------------------------------ manual (formulário)
+
+/** Campos do boleto manual: serve para registrar um boleto emitido fora (banco, outro sistema) ou só a guia do Ethos. */
+function ManualBoletoForm({ charge, boleto, onClose, onDone, onSwitch }: { charge?: Charge; boleto?: Boleto; onClose: () => void; onDone: (item: Boleto) => void; onSwitch?: () => void }) {
+  const balance = charge ? charge.amount_cents - charge.paid_cents : boleto!.amount_cents
+  const [due, setDue] = useState(boleto?.due_date.slice(0, 10) ?? charge!.due_date.slice(0, 10))
+  const [amount, setAmount] = useState(moneyFromCents(balance))
+  const [field, setField] = useState(boleto?.identification_field ?? '')
+  const [ourNumber, setOurNumber] = useState(boleto?.our_number ?? '')
+  const [url, setUrl] = useState(boleto?.bank_slip_url ?? '')
+  const [notes, setNotes] = useState(boleto?.notes ?? '')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const cents = centsFromMoney(amount)
+      const body: Record<string, unknown> = { due_date: due, identification_field: field, our_number: ourNumber, url, notes }
+      if (!boleto) {
+        if (cents === null || cents < 1 || cents > balance) throw new Error(`O valor deve ser de R$ 0,01 até ${brl(balance)}.`)
+        body.charge_id = charge!.id
+        body.amount_cents = cents
+      }
+      const r = boleto
+        ? await request<{ item: Boleto }>(`/api/boletos/${boleto.id}`, json('PATCH', body))
+        : await request<{ item: Boleto }>('/api/boletos/manual', json('POST', body))
+      toast.success(boleto ? 'Boleto atualizado.' : 'Boleto manual registrado.')
+      onDone(r.item)
+    } catch (err) {
+      setError(errorText(err))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title={boleto ? 'Editar boleto manual' : 'Boleto manual'} subtitle={charge ? `${charge.description} · ${charge.tenant_names}` : boleto!.description} size="md" onClose={onClose}>
+      <form className="stack" onSubmit={submit}>
+        {!boleto && <p className="muted small">Sem integração com banco. Cole os dados de um boleto que você emitiu em outro lugar — ou deixe os campos em branco para gerar só uma <strong>guia de cobrança do Ethos</strong> (não é compensável em banco).</p>}
+        <div className="form-grid">
+          <label>
+            Vencimento
+            <input type="date" value={due} onChange={(e) => setDue(e.target.value)} required />
+          </label>
+          {!boleto && (
+            <label>
+              Valor
+              <MaskedInput kind="money" value={amount} onValue={setAmount} aria-label="Valor do boleto R$" />
+            </label>
+          )}
+          <label className="wide">
+            Linha digitável (opcional)
+            <input value={field} onChange={(e) => setField(e.target.value)} inputMode="numeric" maxLength={70} placeholder="00000.00000 00000.000000 00000.000000 0 00000000000000" />
+          </label>
+          <label>
+            Nosso número (opcional)
+            <input value={ourNumber} onChange={(e) => setOurNumber(e.target.value)} maxLength={40} />
+          </label>
+          <label>
+            Link do boleto (opcional)
+            <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} maxLength={500} placeholder="https://" />
+          </label>
+          <label className="wide">
+            Observações (opcional)
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} rows={2} />
+          </label>
+        </div>
+        {error && <Alert>{error}</Alert>}
+        <div className="actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          {onSwitch && <button type="button" onClick={onSwitch}>Emitir pelo Asaas</button>}
+          <button type="submit" className="primary" disabled={busy}>{busy ? 'Salvando…' : boleto ? 'Salvar' : 'Registrar boleto'}</button>
+        </div>
+      </form>
     </Modal>
   )
 }
 
 // ------------------------------------------------------------------------------------------ emitir (individual)
 
-export function IssueBoletoModal({ charge, onClose, onDone }: { charge: Charge; onClose: () => void; onDone: () => void }) {
+export function IssueBoletoModal({ charge, asaas, onClose, onDone }: { charge: Charge; asaas: boolean; onClose: () => void; onDone: () => void }) {
+  const [mode, setMode] = useState<'asaas' | 'manual'>(asaas ? 'asaas' : 'manual')
+  if (mode === 'manual') return <ManualBoletoForm charge={charge} onClose={onClose} onDone={() => onDone()} onSwitch={asaas ? () => setMode('asaas') : undefined} />
+  return <AsaasIssue charge={charge} onClose={onClose} onDone={onDone} onSwitch={() => setMode('manual')} />
+}
+
+function AsaasIssue({ charge, onClose, onDone, onSwitch }: { charge: Charge; onClose: () => void; onDone: () => void; onSwitch: () => void }) {
   const balance = charge.amount_cents - charge.paid_cents
   const [due, setDue] = useState(charge.due_date < today() ? today() : charge.due_date)
   const [error, setError] = useState('')
@@ -188,7 +310,8 @@ export function IssueBoletoModal({ charge, onClose, onDone }: { charge: Charge; 
         {error && <Alert>{error}</Alert>}
         <div className="actions">
           <button type="button" onClick={onClose}>Cancelar</button>
-          <button type="submit" className="primary" disabled={busy}>{busy ? 'Emitindo…' : 'Emitir boleto'}</button>
+          <button type="button" onClick={onSwitch}>Registrar manualmente</button>
+          <button type="submit" className="primary" disabled={busy}>{busy ? 'Emitindo…' : 'Emitir pelo Asaas'}</button>
         </div>
       </form>
     </Modal>
@@ -205,7 +328,8 @@ interface BulkResult {
   stopped_by: string | null
 }
 
-export function BulkBoletoModal({ month, onClose, onDone }: { month: string; onClose: () => void; onDone: () => void }) {
+export function BulkBoletoModal({ month, asaas, onClose, onDone }: { month: string; asaas: boolean; onClose: () => void; onDone: () => void }) {
+  const [mode, setMode] = useState<'asaas' | 'manual'>(asaas ? 'asaas' : 'manual')
   const [result, setResult] = useState<BulkResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -215,7 +339,7 @@ export function BulkBoletoModal({ month, onClose, onDone }: { month: string; onC
     setBusy(true)
     setError('')
     try {
-      const r = await request<BulkResult>('/api/boletos/bulk', json('POST', { month }))
+      const r = await request<BulkResult>(mode === 'manual' ? '/api/boletos/manual/bulk' : '/api/boletos/bulk', json('POST', { month }))
       setTotal((t) => t + r.created)
       setResult(r)
       onDone()
@@ -229,21 +353,43 @@ export function BulkBoletoModal({ month, onClose, onDone }: { month: string; onC
 
   const [y, m] = month.split('-')
   return (
-    <Modal title="Emitir boletos em lote" subtitle={`Vencimentos de ${m}/${y}`} size="md" onClose={onClose} locked={busy}>
+    <Modal title={mode === 'manual' ? 'Gerar guias em lote' : 'Emitir boletos em lote'} subtitle={`Vencimentos de ${m}/${y}`} size="md" onClose={onClose} locked={busy}>
       {!result ? (
         <div className="stack">
-          <p>
-            Vamos emitir no Asaas um boleto para <strong>cada cobrança em aberto, parcial ou vencida</strong> de {m}/{y} que ainda não tem boleto. O valor de cada boleto é o saldo da cobrança.
-          </p>
-          <ul className="muted small">
-            <li>Cobranças vencidas recebem vencimento de hoje (o Asaas não aceita data passada).</li>
-            <li>Até 100 por vez; se houver mais, basta repetir.</li>
-            <li>Quem falhar (ex.: inquilino sem CPF/CNPJ válido) aparece na lista, sem impedir os demais.</li>
-          </ul>
+          {asaas && (
+            <fieldset className="mode-pick">
+              <legend>Como emitir</legend>
+              <label><input type="radio" name="bulk-mode" checked={mode === 'asaas'} onChange={() => setMode('asaas')} /> Pelo Asaas (boleto bancário real)</label>
+              <label><input type="radio" name="bulk-mode" checked={mode === 'manual'} onChange={() => setMode('manual')} /> Manual (guia de cobrança do Ethos)</label>
+            </fieldset>
+          )}
+          {mode === 'asaas' ? (
+            <>
+              <p>
+                Vamos emitir no Asaas um boleto para <strong>cada cobrança em aberto, parcial ou vencida</strong> de {m}/{y} que ainda não tem boleto. O valor de cada boleto é o saldo da cobrança.
+              </p>
+              <ul className="muted small">
+                <li>Cobranças vencidas recebem vencimento de hoje (o Asaas não aceita data passada).</li>
+                <li>Até 100 por vez; se houver mais, basta repetir.</li>
+                <li>Quem falhar (ex.: inquilino sem CPF/CNPJ válido) aparece na lista, sem impedir os demais.</li>
+              </ul>
+            </>
+          ) : (
+            <>
+              <p>
+                Vamos criar uma <strong>guia de cobrança manual</strong> para cada cobrança em aberto, parcial ou vencida de {m}/{y} que ainda não tem boleto, com o saldo e o vencimento da cobrança.
+              </p>
+              <ul className="muted small">
+                <li>Não fala com nenhum banco: a guia serve para controle e para informar o locatário; não é um boleto bancário.</li>
+                <li>Depois você pode abrir cada uma e acrescentar linha digitável, nosso número ou link de um boleto emitido fora.</li>
+                <li>Até 100 por vez; se houver mais, basta repetir.</li>
+              </ul>
+            </>
+          )}
           {error && <Alert>{error}</Alert>}
           <div className="actions">
             <button onClick={onClose}>Cancelar</button>
-            <button className="primary" disabled={busy} onClick={run}>{busy ? 'Emitindo… (pode levar um pouco)' : 'Emitir boletos'}</button>
+            <button className="primary" disabled={busy} onClick={run}>{busy ? 'Emitindo… (pode levar um pouco)' : mode === 'manual' ? 'Gerar guias' : 'Emitir boletos'}</button>
           </div>
         </div>
       ) : (
@@ -314,14 +460,6 @@ export default function BoletosTab({ month, version, isAdmin, onChange, onError 
     }
   }
 
-  if (info && !info.connected) {
-    return (
-      <Empty title="Asaas não conectado">
-        Para emitir boletos, conecte o Asaas em <strong>Administração › Integrações</strong> (use o sandbox para testar sem dinheiro real).
-      </Empty>
-    )
-  }
-
   return (
     <>
       <div className="toolbar">
@@ -333,22 +471,22 @@ export default function BoletosTab({ month, version, isAdmin, onChange, onError 
         </select>
         {info?.environment === 'sandbox' && <span className="badge">Ambiente de testes</span>}
         <span className="spacer" />
-        <button onClick={syncAll} disabled={syncing}>{syncing ? 'Atualizando…' : 'Atualizar situações'}</button>
+        {info?.connected && <button onClick={syncAll} disabled={syncing}>{syncing ? 'Atualizando…' : 'Atualizar situações'}</button>}
         <button className="primary" onClick={() => setBulk(true)}>Emitir boletos do mês</button>
       </div>
 
-      {bulk && <BulkBoletoModal month={month} onClose={() => setBulk(false)} onDone={reload} />}
+      {bulk && <BulkBoletoModal month={month} asaas={Boolean(info?.connected)} onClose={() => setBulk(false)} onDone={reload} />}
       {viewing && <BoletoDetail boleto={viewing} isAdmin={isAdmin} onClose={() => setViewing(null)} onChanged={reload} />}
 
       {loading ? (
         <Loading label="Carregando…" />
       ) : items.length === 0 ? (
-        <p className="empty">Nenhum boleto com vencimento neste mês. Use “Emitir boletos do mês” ou o botão “Emitir boleto” em uma cobrança.</p>
+        <p className="empty">Nenhum boleto com vencimento neste mês. Use “Emitir boletos do mês” ou o botão “Emitir boleto” em uma cobrança (funciona com o Asaas ou manualmente).</p>
       ) : (
         <div className="panel table-wrap">
           <table>
             <thead>
-              <tr><th>Vencimento</th><th>Imóvel / locatário</th><th>Cobrança</th><th>Valor</th><th>Situação</th><th /></tr>
+              <tr><th>Vencimento</th><th>Imóvel / locatário</th><th>Cobrança</th><th>Valor</th><th>Tipo</th><th>Situação</th><th /></tr>
             </thead>
             <tbody>
               {items.map((b) => (
@@ -357,10 +495,11 @@ export default function BoletosTab({ month, version, isAdmin, onChange, onError 
                   <td>{b.property_name} · {b.unit_identifier}<div className="muted small">{b.tenant_names}</div></td>
                   <td>{b.description}</td>
                   <td>{brl(b.amount_cents)}</td>
+                  <td>{b.provider === 'manual' ? 'Manual' : 'Asaas'}</td>
                   <td><span className={`badge badge-b-${b.status}`}>{LABEL[b.status]}</span></td>
                   <td className="row-actions" onClick={(e) => e.stopPropagation()}>
-                    {b.invoice_url && b.status !== 'cancelada' && (
-                      <a className="btn" href={b.invoice_url} target="_blank" rel="noopener noreferrer">Abrir</a>
+                    {(b.invoice_url ?? b.bank_slip_url) && b.status !== 'cancelada' && (
+                      <a className="btn" href={(b.invoice_url ?? b.bank_slip_url)!} target="_blank" rel="noopener noreferrer">Abrir</a>
                     )}
                     <button onClick={() => setViewing(b)}>Ver</button>
                   </td>

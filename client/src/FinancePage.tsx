@@ -210,13 +210,13 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
           ))}
         </select>
         <span className="spacer" />
-        {connected && <button onClick={() => setBulk(true)}>Emitir boletos do mês</button>}
+        <button onClick={() => setBulk(true)}>Emitir boletos do mês</button>
         <button onClick={() => setAdding(true)}>Nova cobrança avulsa</button>
         <button className="primary" onClick={generate}>Gerar aluguéis do mês</button>
       </div>
 
-      {bulk && <BulkBoletoModal month={month} onClose={() => setBulk(false)} onDone={() => { reloadBoletos(); onChange() }} />}
-      {issuing && <IssueBoletoModal charge={issuing} onClose={() => setIssuing(null)} onDone={() => { setIssuing(null); reloadBoletos(); onChange() }} />}
+      {bulk && <BulkBoletoModal month={month} asaas={connected} onClose={() => setBulk(false)} onDone={() => { reloadBoletos(); onChange() }} />}
+      {issuing && <IssueBoletoModal charge={issuing} asaas={connected} onClose={() => setIssuing(null)} onDone={() => { setIssuing(null); reloadBoletos(); onChange() }} />}
       {boleto && <BoletoDetail boleto={boleto} isAdmin={isAdmin} onClose={() => setBoleto(null)} onChanged={() => { reloadBoletos(); onChange() }} />}
       {adding && (
         <Modal title="Nova cobrança avulsa" onClose={() => setAdding(false)}>
@@ -254,7 +254,7 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
                   Cancelar cobrança
                 </button>
               )}
-              {connected && chargeAcceptsBoleto(viewing) && (
+              {chargeAcceptsBoleto(viewing) && (
                 <button
                   onClick={() => {
                     const c = viewing
@@ -313,10 +313,8 @@ function ChargesTab({ month, version, isAdmin, onChange, onError, onOk, onReceip
                   <td>{brl(c.paid_cents)}</td>
                   <td><span className={`badge badge-c-${c.status}`}>{STATUS_LABEL[c.status]}</span></td>
                   <td className="row-actions" onClick={(e) => e.stopPropagation()}>
-                    {connected && chargeAcceptsBoleto(c) && (
-                      byCharge.get(c.id) && ['pendente', 'vencida'].includes(byCharge.get(c.id)!.status)
-                        ? <button onClick={() => setBoleto(byCharge.get(c.id)!)}>Boleto</button>
-                        : <button onClick={() => setIssuing(c)}>Emitir boleto</button>
+                    {chargeAcceptsBoleto(c) && byCharge.get(c.id) && ['pendente', 'vencida'].includes(byCharge.get(c.id)!.status) && (
+                      <button onClick={() => setBoleto(byCharge.get(c.id)!)} aria-label="Ver boleto">Boleto</button>
                     )}
                     {(c.status === 'aberta' || c.status === 'parcial' || c.status === 'vencida') && (
                       <button onClick={() => setPaying(c)}>Receber</button>

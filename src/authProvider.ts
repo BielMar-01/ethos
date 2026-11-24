@@ -27,6 +27,8 @@ export interface AuthProvider {
   /** Valida o access_token de um link de recuperação e devolve o usuário dono. */
   userFromRecoveryToken(token: string): Promise<{ id: string } | null>;
   setPassword(id: string, password: string): Promise<void>;
+  /** Troca o e-mail de login (já confirmado: quem troca provou a senha atual). */
+  updateEmail(id: string, email: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------- Supabase
@@ -134,6 +136,16 @@ class SupabaseAuthProvider implements AuthProvider {
     if (status === 422 && json.error_code === "weak_password") throw new AuthProviderError("weak_password", json.msg);
     if (status >= 400) throw new AuthProviderError("unavailable", `setPassword falhou (HTTP ${status})`);
   }
+
+  async updateEmail(id: string, email: string) {
+    const { status, json } = await this.call(`/auth/v1/admin/users/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      key: this.secretKey,
+      body: { email, email_confirm: true },
+    });
+    if (status === 422 || json.error_code === "email_exists") throw new AuthProviderError("exists");
+    if (status >= 400) throw new AuthProviderError("unavailable", `updateEmail falhou (HTTP ${status})`);
+  }
 }
 
 // ----------------------------------------------------------------- Memória
@@ -190,6 +202,13 @@ export class MemoryAuthProvider implements AuthProvider {
     if (!u) throw new AuthProviderError("unavailable", "usuário inexistente");
     u.hash = hashPassword(password);
     for (const [t, uid] of this.tokens) if (uid === id) this.tokens.delete(t);
+  }
+
+  async updateEmail(id: string, email: string) {
+    const u = this.users.get(id);
+    if (!u) throw new AuthProviderError("unavailable", "usuário inexistente");
+    if ([...this.users.values()].some((x) => x.email === email && x.id !== id)) throw new AuthProviderError("exists");
+    u.email = email;
   }
 }
 

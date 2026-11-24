@@ -45,6 +45,8 @@ export const EVENTS: { event: string; label: string; group: string }[] = [
   { event: "inspection.created", label: "Vistoria criada", group: "Manutenção e vistorias" },
   { event: "inspection.status_changed", label: "Situação da vistoria mudou", group: "Manutenção e vistorias" },
   { event: "announcement.published", label: "Comunicado publicado", group: "Comunicados" },
+  { event: "visitor.entered", label: "Visitante entrou (portaria)", group: "Portaria" },
+  { event: "visitor.left", label: "Visitante saiu (portaria)", group: "Portaria" },
 ];
 export const EVENT_NAMES = new Set(EVENTS.map((e) => e.event));
 

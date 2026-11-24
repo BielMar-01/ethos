@@ -101,7 +101,7 @@ describe("auditoria", () => {
     assert.equal((await a.call("GET", "/api/audit?q=Pessoa 3")).body.items.length, 1);
     assert.equal((await a.call("GET", "/api/audit?q=%25")).body.items.length, 0, "% é literal, não curinga");
     assert.equal((await a.call("GET", "/api/audit?kind=denied")).body.items.length, 0);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date()); // o filtro usa o dia de Brasília
     assert.ok((await a.call("GET", `/api/audit?from=${today}&to=${today}`)).body.items.length >= 5);
     assert.equal((await a.call("GET", "/api/audit?from=2020-01-01&to=2020-01-02")).body.items.length, 0);
     assert.equal((await a.call("GET", "/api/audit?kind=xx")).status, 400);

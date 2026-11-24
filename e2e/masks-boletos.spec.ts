@@ -176,7 +176,7 @@ test.describe("boletos (Asaas simulado na tela)", () => {
     unit_identifier: "Apto 1", property_name: "Prédio Teste", tenant_names: "Fulano de Tal",
   };
   const boleto = {
-    id: 5001, charge_id: 9001, status: "pendente", amount_cents: 250000, due_date: "2030-12-10",
+    id: 5001, charge_id: 9001, provider: "asaas", our_number: null, notes: null, status: "pendente", amount_cents: 250000, due_date: "2030-12-10",
     invoice_url: "https://sandbox.asaas.com/i/pay_1", bank_slip_url: null, identification_field: "23793.38128 60000.000003 00000.000400 1 00000000000000",
     paid_at: null, environment: "sandbox", description: "Aluguel 12/2030", unit_identifier: "Apto 1", property_name: "Prédio Teste", tenant_names: "Fulano de Tal",
   };
@@ -190,12 +190,17 @@ test.describe("boletos (Asaas simulado na tela)", () => {
     await page.locator('input[type="month"]').fill("2030-12");
   }
 
-  test("sem Asaas conectado: não oferece emitir e a aba Boletos orienta a conectar", async ({ page }) => {
+  test("sem Asaas conectado: oferece só o boleto manual e a aba Boletos continua utilizável", async ({ page }) => {
     await openFinance(page, { connected: false });
-    await expect(page.getByRole("cell", { name: "Aluguel 12/2030" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Emitir boleto", exact: true })).toHaveCount(0);
+    await page.getByRole("cell", { name: "Aluguel 12/2030" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Emitir boleto", exact: true }).click();
+    const dlg = page.getByRole("dialog");
+    await expect(dlg.getByRole("heading", { name: "Boleto manual" })).toBeVisible();
+    await expect(dlg.getByRole("button", { name: "Emitir pelo Asaas" })).toHaveCount(0);
+    await dlg.getByRole("button", { name: "Cancelar" }).click();
     await page.getByRole("tab", { name: "Boletos" }).click();
-    await expect(page.getByText("Asaas não conectado")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Emitir boletos do mês" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Atualizar situações" })).toHaveCount(0);
   });
 
   test("conectado: emite boleto individual pelo modal e mostra erro vindo do servidor", async ({ page }) => {
@@ -206,19 +211,21 @@ test.describe("boletos (Asaas simulado na tela)", () => {
       posted = r.request().postDataJSON();
       return r.fulfill({ status: 201, json: { item: boleto } });
     });
-    await page.getByRole("button", { name: "Emitir boleto", exact: true }).click();
+    await page.getByRole("cell", { name: "Aluguel 12/2030" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Emitir boleto", exact: true }).click();
     const dlg = page.getByRole("dialog");
     await expect(dlg).toContainText("2.500,00");
     await dlg.getByLabel("Vencimento do boleto").fill("2030-12-12");
-    await dlg.getByRole("button", { name: "Emitir boleto", exact: true }).click();
+    await dlg.getByRole("button", { name: "Emitir pelo Asaas" }).click();
     await expect(page.getByText("Boleto emitido.")).toBeVisible();
     expect(posted).toEqual({ charge_id: 9001, due_date: "2030-12-12" });
 
     // Erro do servidor aparece dentro do modal, sem fechar.
     await page.unroute("**/api/boletos");
     await page.route("**/api/boletos", (r) => (r.request().method() === "POST" ? r.fulfill({ status: 422, json: { error: "Fulano: o CPF/CNPJ cadastrado não é válido para emitir boleto." } }) : r.fallback()));
-    await page.getByRole("button", { name: "Emitir boleto", exact: true }).click();
+    await page.getByRole("cell", { name: "Aluguel 12/2030" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Emitir boleto", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Emitir pelo Asaas" }).click();
     await expect(page.getByRole("dialog").getByRole("alert")).toContainText("CPF/CNPJ");
   });
 
@@ -244,6 +251,7 @@ test.describe("boletos (Asaas simulado na tela)", () => {
     await page.getByRole("button", { name: "Emitir boletos do mês" }).click();
     const dlg = page.getByRole("dialog");
     await expect(dlg).toContainText("12/2030");
+    await expect(dlg.getByLabel("Pelo Asaas (boleto bancário real)")).toBeChecked();
     await dlg.getByRole("button", { name: "Emitir boletos" }).click();
     await expect(dlg).toContainText("2 boleto(s) emitido(s)");
     await expect(dlg).toContainText("1 não puderam ser emitidos");

@@ -14,6 +14,9 @@ import { emitWebhook } from "./webhooks.js";
  * - Um boleto em aberto por cobrança (índice único). A linha é reservada ANTES de falar com o Asaas, então
  *   dois cliques seguidos não geram dois boletos.
  * - Dados enviados ao Asaas: nome, CPF/CNPJ e e-mail do locatário principal, valor, vencimento e descrição.
+ * - Boleto MANUAL (provider 'manual'): não depende de nenhuma integração. A equipe registra um boleto emitido em
+ *   outro lugar (linha digitável, nosso número, link) ou gera só a "guia de cobrança" do Ethos para imprimir.
+ *   A guia NÃO é compensável em banco. A equipe também marca o boleto manual como pago; a baixa da cobrança continua em Pagamentos.
  */
 
 const BULK_MAX = 100;
@@ -84,7 +87,8 @@ interface AsaasPayment {
 }
 
 const BOLETO_SELECT = `
-  SELECT b.id, b.charge_id, b.status, b.amount_cents, b.due_date, b.invoice_url, b.bank_slip_url, b.identification_field,
+  SELECT b.id, b.charge_id, b.provider, b.our_number, b.notes, b.amount_cents, b.due_date, b.invoice_url, b.bank_slip_url, b.identification_field,
+         CASE WHEN b.provider = 'manual' AND b.status = 'pendente' AND b.due_date < (now() AT TIME ZONE 'America/Sao_Paulo')::date THEN 'vencida' ELSE b.status END AS status,
          b.paid_at, b.environment, b.created_at, b.updated_at,
          c.description, c.kind, u.identifier AS unit_identifier, pr.name AS property_name,
          (SELECT string_agg(t.name, ', ' ORDER BY lt.position) FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenant_id WHERE lt.lease_id = c.lease_id) AS tenant_names
@@ -104,18 +108,80 @@ async function configFor(orgId: number): Promise<Cfg> {
   return { orgId, asaas: a };
 }
 
-/** Emite um boleto para a cobrança. Lança BoletoError com mensagem pronta para o usuário. */
-export async function issueBoleto(cfg: Cfg, userId: number, chargeId: number, dueOverride?: string): Promise<Record<string, unknown>> {
-  const { orgId, asaas: a } = cfg;
-  const [charge] = await db.query<{ id: number; lease_id: number; description: string; due_date: string; amount_cents: number; paid_cents: number; status: string }>(
-    `${CHARGE_SELECT} WHERE c.id = $1 AND c.organization_id = $2`,
-    [chargeId, orgId],
-  );
+interface ChargeRow { id: number; lease_id: number; description: string; due_date: string; amount_cents: number; paid_cents: number; status: string }
+
+/** Cobrança que aceita boleto + saldo a receber. */
+async function openCharge(orgId: number, chargeId: number): Promise<{ charge: ChargeRow; balance: number }> {
+  const [charge] = await db.query<ChargeRow>(`${CHARGE_SELECT} WHERE c.id = $1 AND c.organization_id = $2`, [chargeId, orgId]);
   if (!charge) throw new BoletoError(404, "Cobrança não encontrada.");
   if (charge.status === "cancelada") throw new BoletoError(409, "Esta cobrança está cancelada.");
   if (charge.status === "paga") throw new BoletoError(409, "Esta cobrança já está paga.");
   const balance = charge.amount_cents - charge.paid_cents;
   if (balance < 1) throw new BoletoError(409, "Esta cobrança não tem saldo a receber.");
+  return { charge, balance };
+}
+
+export interface ManualInput {
+  due_date?: string;
+  amount_cents?: number;
+  identification_field?: string | null;
+  our_number?: string | null;
+  url?: string | null;
+  notes?: string | null;
+}
+
+const optText = (v: unknown, max: number, label: string): string | null => {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v !== "string" || v.trim().length > max) throw new BoletoError(400, `${label}: texto inválido ou longo demais (máx. ${max}).`);
+  return v.trim() || null;
+};
+
+/** Valida os campos livres do boleto manual (devolve valores prontos para gravar). */
+export function cleanManual(i: ManualInput): { identification_field: string | null; our_number: string | null; url: string | null; notes: string | null } {
+  const field = optText(i.identification_field, 70, "Linha digitável");
+  if (field && !/^[\d .-]{10,70}$/.test(field)) throw new BoletoError(400, "A linha digitável deve ter só números (pode ter pontos e espaços).");
+  const url = optText(i.url, 500, "Link");
+  if (url && !/^https?:\/\/\S+$/i.test(url)) throw new BoletoError(400, "O link do boleto deve começar com http:// ou https://.");
+  return { identification_field: field, our_number: optText(i.our_number, 40, "Nosso número"), url, notes: optText(i.notes, 500, "Observações") };
+}
+
+function manualDue(chargeDue: string, requested: string | undefined): string {
+  if (requested === undefined) return chargeDue;
+  const max = new Date(Date.parse(`${brToday()}T00:00:00Z`) + 365 * 86_400_000).toISOString().slice(0, 10);
+  if (!isRealDate(requested) || requested > max) throw new BoletoError(400, "O vencimento deve ser uma data válida de até 1 ano à frente.");
+  return requested;
+}
+
+/** Cria um boleto manual (sem integração). Um em aberto por cobrança, como nos demais. */
+export async function issueManual(orgId: number, userId: number, chargeId: number, input: ManualInput = {}): Promise<Record<string, unknown>> {
+  const { charge, balance } = await openCharge(orgId, chargeId);
+  const fields = cleanManual(input);
+  let amount = balance;
+  if (input.amount_cents !== undefined) {
+    if (!Number.isInteger(input.amount_cents) || input.amount_cents < 1 || input.amount_cents > balance) {
+      throw new BoletoError(400, "O valor do boleto deve ser de 1 centavo até o saldo da cobrança.");
+    }
+    amount = input.amount_cents;
+  }
+  const due = manualDue(charge.due_date, input.due_date);
+  try {
+    const [row] = await db.query<{ id: number }>(
+      `INSERT INTO boletos (organization_id, charge_id, provider, environment, external_id, amount_cents, due_date, identification_field, our_number, bank_slip_url, notes, created_by)
+       VALUES ($1,$2,'manual','manual',$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [orgId, chargeId, `manual:${crypto.randomUUID()}`, amount, due, fields.identification_field, fields.our_number, fields.url, fields.notes, userId],
+    );
+    const [item] = await db.query(`${BOLETO_SELECT} WHERE b.id = $1`, [row!.id]);
+    return item!;
+  } catch (err) {
+    if (typeof err === "object" && err && (err as { code?: string }).code === "23505") throw new BoletoError(409, "Esta cobrança já tem um boleto em aberto.");
+    throw err;
+  }
+}
+
+/** Emite um boleto para a cobrança. Lança BoletoError com mensagem pronta para o usuário. */
+export async function issueBoleto(cfg: Cfg, userId: number, chargeId: number, dueOverride?: string): Promise<Record<string, unknown>> {
+  const { orgId, asaas: a } = cfg;
+  const { charge, balance } = await openCharge(orgId, chargeId);
 
   const [tenant] = await db.query<{ id: number; name: string; document: string; email: string | null }>(
     `SELECT t.id, t.name, t.document, t.email FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenant_id
@@ -216,7 +282,7 @@ boletosRouter.use("/boletos", requireAuth, requireRole("admin", "colaborador"));
 
 boletosRouter.get("/boletos/status", async (req, res) => {
   const a = await orgAsaas(req.auth!.organization.id);
-  res.json({ connected: Boolean(a), environment: a?.env ?? null, fine_percent: a?.fine ?? 0, interest_percent: a?.interest ?? 0 });
+  res.json({ manual: true, connected: Boolean(a), environment: a?.env ?? null, fine_percent: a?.fine ?? 0, interest_percent: a?.interest ?? 0 });
 });
 
 boletosRouter.get("/boletos", async (req, res) => {
@@ -265,20 +331,19 @@ boletosRouter.post("/boletos", async (req, res) => {
  * Em lote: todas as cobranças em aberto de um mês (`month`), ou as indicadas em `charge_ids`, que ainda não têm boleto.
  * Até 100 por chamada; se houver mais, `remaining` diz quantas faltam (basta repetir).
  */
-boletosRouter.post("/boletos/bulk", async (req, res) => {
-  const orgId = req.auth!.organization.id;
-  const body = (req.body ?? {}) as { month?: unknown; charge_ids?: unknown; kinds?: unknown };
+/** Cobranças em aberto sem boleto aberto, escolhidas por `month` ou `charge_ids` (compartilhado pelo lote Asaas e manual). */
+async function bulkTargets(orgId: number, body: { month?: unknown; charge_ids?: unknown; kinds?: unknown }): Promise<{ error: string } | { todo: { id: number; description: string; unit_identifier: string }[] }> {
   const params: unknown[] = [orgId];
   let where = "c.organization_id = $1";
   if (Array.isArray(body.charge_ids)) {
     const ids = [...new Set(body.charge_ids.map(parseId).filter((n): n is number => n !== undefined))];
-    if (ids.length === 0) return void res.status(400).json({ error: "charge_ids vazio ou inválido" });
-    if (ids.length > 500) return void res.status(400).json({ error: "Máximo de 500 cobranças por pedido" });
+    if (ids.length === 0) return { error: "charge_ids vazio ou inválido" };
+    if (ids.length > 500) return { error: "Máximo de 500 cobranças por pedido" };
     params.push(ids);
     where += ` AND c.id = ANY($${params.length}::int[])`;
   } else {
     const r = monthRange(body.month);
-    if (!r) return void res.status(400).json({ error: "Informe month (AAAA-MM) ou charge_ids" });
+    if (!r) return { error: "Informe month (AAAA-MM) ou charge_ids" };
     params.push(r.start, r.next);
     where += ` AND c.due_date >= $${params.length - 1} AND c.due_date < $${params.length}`;
   }
@@ -286,15 +351,23 @@ boletosRouter.post("/boletos/bulk", async (req, res) => {
     params.push(body.kinds.map(String));
     where += ` AND c.kind = ANY($${params.length}::text[])`;
   }
+  const todo = await db.query<{ id: number; description: string; unit_identifier: string }>(
+    `SELECT x.id, x.description, x.unit_identifier FROM (${CHARGE_SELECT} WHERE ${where}) x
+     WHERE x.status IN ('aberta','parcial','vencida')
+       AND NOT EXISTS (SELECT 1 FROM boletos b WHERE b.charge_id = x.id AND b.status IN ('pendente','vencida'))
+     ORDER BY x.due_date, x.id`,
+    params,
+  );
+  return { todo };
+}
+
+boletosRouter.post("/boletos/bulk", async (req, res) => {
+  const orgId = req.auth!.organization.id;
   try {
     const cfg = await configFor(orgId);
-    const todo = await db.query<{ id: number; description: string; unit_identifier: string }>(
-      `SELECT x.id, x.description, x.unit_identifier FROM (${CHARGE_SELECT} WHERE ${where}) x
-       WHERE x.status IN ('aberta','parcial','vencida')
-         AND NOT EXISTS (SELECT 1 FROM boletos b WHERE b.charge_id = x.id AND b.status IN ('pendente','vencida'))
-       ORDER BY x.due_date, x.id`,
-      params,
-    );
+    const t = await bulkTargets(orgId, (req.body ?? {}) as Record<string, unknown>);
+    if ("error" in t) return void res.status(400).json({ error: t.error });
+    const todo = t.todo;
     const batch = todo.slice(0, BULK_MAX);
     const created: number[] = [];
     const failed: { charge_id: number; label: string; error: string }[] = [];
@@ -314,6 +387,109 @@ boletosRouter.post("/boletos/bulk", async (req, res) => {
     }
     const attempted = created.length + failed.length;
     res.json({ eligible: todo.length, created: created.length, failed, remaining: todo.length - attempted, stopped_by: stoppedBy });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+/** Manual, individual: registra um boleto emitido fora (linha digitável, nosso número, link) ou só a guia de cobrança do Ethos. */
+boletosRouter.post("/boletos/manual", async (req, res) => {
+  const chargeId = parseId(req.body?.charge_id);
+  if (!chargeId) return void res.status(400).json({ error: "Informe charge_id" });
+  const b = req.body as Record<string, unknown>;
+  try {
+    const item = await issueManual(req.auth!.organization.id, req.auth!.user.id, chargeId, {
+      due_date: b.due_date === undefined || b.due_date === null || b.due_date === "" ? undefined : String(b.due_date),
+      amount_cents: b.amount_cents === undefined || b.amount_cents === null ? undefined : (b.amount_cents as number),
+      identification_field: b.identification_field as string,
+      our_number: b.our_number as string,
+      url: b.url as string,
+      notes: b.notes as string,
+    });
+    res.status(201).json({ item });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+/** Manual, em lote: uma guia para cada cobrança em aberto do mês (ou de `charge_ids`) que ainda não tem boleto. */
+boletosRouter.post("/boletos/manual/bulk", async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  const t = await bulkTargets(orgId, (req.body ?? {}) as Record<string, unknown>);
+  if ("error" in t) return void res.status(400).json({ error: t.error });
+  const batch = t.todo.slice(0, BULK_MAX);
+  let created = 0;
+  const failed: { charge_id: number; label: string; error: string }[] = [];
+  for (const c of batch) {
+    try {
+      await issueManual(orgId, req.auth!.user.id, c.id);
+      created++;
+    } catch (err) {
+      if (!(err instanceof BoletoError)) throw err;
+      failed.push({ charge_id: c.id, label: `${c.description} · ${c.unit_identifier}`, error: err.message });
+    }
+  }
+  res.json({ eligible: t.todo.length, created, failed, remaining: t.todo.length - batch.length, stopped_by: null });
+});
+
+async function manualBoleto(orgId: number, rawId: unknown): Promise<{ id: number; status: string; charge_id: number } | undefined> {
+  const id = parseId(rawId);
+  if (!id) return undefined;
+  const [b] = await db.query<{ id: number; status: string; charge_id: number; provider: string }>("SELECT id, status, charge_id, provider FROM boletos WHERE id = $1 AND organization_id = $2", [id, orgId]);
+  if (!b) return undefined;
+  if (b.provider !== "manual") throw new BoletoError(409, "Este boleto foi emitido pelo Asaas; use a atualização de situação.");
+  return b;
+}
+
+/** Edita um boleto manual em aberto. */
+boletosRouter.patch("/boletos/:id", async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  try {
+    const b = await manualBoleto(orgId, req.params.id);
+    if (!b) return void res.status(404).json({ error: "Não encontrado" });
+    if (b.status !== "pendente") return void res.status(409).json({ error: "Só é possível editar um boleto manual em aberto." });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const [cur] = await db.query<{ due_date: string; identification_field: string | null; our_number: string | null; bank_slip_url: string | null; notes: string | null }>(
+      "SELECT due_date, identification_field, our_number, bank_slip_url, notes FROM boletos WHERE id = $1",
+      [b.id],
+    );
+    const pick = (k: string, now: string | null) => (body[k] === undefined ? now : (body[k] as string));
+    const fields = cleanManual({
+      identification_field: pick("identification_field", cur!.identification_field),
+      our_number: pick("our_number", cur!.our_number),
+      url: pick("url", cur!.bank_slip_url),
+      notes: pick("notes", cur!.notes),
+    });
+    const due = body.due_date === undefined ? cur!.due_date : manualDue(cur!.due_date, String(body.due_date));
+    await db.query(
+      "UPDATE boletos SET due_date = $1, identification_field = $2, our_number = $3, bank_slip_url = $4, notes = $5, updated_at = now() WHERE id = $6",
+      [due, fields.identification_field, fields.our_number, fields.url, fields.notes, b.id],
+    );
+    const [item] = await db.query(`${BOLETO_SELECT} WHERE b.id = $1`, [b.id]);
+    res.json({ item });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+/** Marca um boleto manual como pago (informação da equipe). A baixa da cobrança continua em Pagamentos. */
+boletosRouter.post("/boletos/:id/paid", async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  try {
+    const b = await manualBoleto(orgId, req.params.id);
+    if (!b) return void res.status(404).json({ error: "Não encontrado" });
+    if (b.status === "paga") return void res.status(409).json({ error: "Este boleto já está marcado como pago." });
+    if (b.status === "cancelada") return void res.status(409).json({ error: "Este boleto está cancelado." });
+    const raw = req.body?.paid_at;
+    const paidAt = raw === undefined || raw === null || raw === "" ? brToday() : String(raw);
+    if (!isRealDate(paidAt) || paidAt > brToday()) return void res.status(400).json({ error: "A data do pagamento deve ser uma data válida que não esteja no futuro." });
+    await db.query("UPDATE boletos SET status = 'paga', paid_at = $1, updated_at = now() WHERE id = $2", [paidAt, b.id]);
+    emitWebhook({
+      organizationId: orgId, event: "boleto.paid", actor: { id: req.auth!.user.id, name: req.auth!.user.name, role: req.auth!.role },
+      entity: "boletos", entityId: b.id, summary: "Boleto marcado como pago", data: { boleto_id: b.id, charge_id: b.charge_id, paid_at: paidAt },
+    });
+    const [item] = await db.query(`${BOLETO_SELECT} WHERE b.id = $1`, [b.id]);
+    res.json({ item });
   } catch (err) {
     fail(res, err);
   }
@@ -359,6 +535,7 @@ boletosRouter.post("/boletos/:id/sync", async (req, res) => {
     const [b] = id ? await db.query<{ id: number; external_id: string; status: string; charge_id: number }>("SELECT id, external_id, status, charge_id FROM boletos WHERE id = $1 AND organization_id = $2", [id, orgId]) : [];
     if (!b) return void res.status(404).json({ error: "Não encontrado" });
     if (b.external_id.startsWith("pending:")) return void res.status(409).json({ error: "Este boleto ainda está sendo emitido." });
+    if (b.external_id.startsWith("manual:")) return void res.status(409).json({ error: "Boleto manual não é atualizado automaticamente. Marque como pago quando receber." });
     await syncOne(cfg, b, req.auth!.user.id);
     const [item] = await db.query(`${BOLETO_SELECT} WHERE b.id = $1`, [b.id]);
     res.json({ item });
@@ -372,9 +549,15 @@ boletosRouter.post("/boletos/:id/cancel", requireRole("admin"), async (req, res)
   const orgId = req.auth!.organization.id;
   const id = parseId(req.params.id);
   try {
-    const cfg = await configFor(orgId);
     const [b] = id ? await db.query<{ id: number; external_id: string; status: string }>("SELECT id, external_id, status FROM boletos WHERE id = $1 AND organization_id = $2", [id, orgId]) : [];
     if (!b) return void res.status(404).json({ error: "Não encontrado" });
+    if (b.external_id.startsWith("manual:")) {
+      if (b.status === "paga") return void res.status(409).json({ error: "Este boleto já foi pago e não pode ser cancelado." });
+      if (b.status === "cancelada") return void res.status(409).json({ error: "Este boleto já está cancelado." });
+      await db.query("UPDATE boletos SET status = 'cancelada', updated_at = now() WHERE id = $1", [b.id]);
+      return void res.status(204).end();
+    }
+    const cfg = await configFor(orgId);
     if (b.status === "paga") return void res.status(409).json({ error: "Este boleto já foi pago e não pode ser cancelado." });
     if (b.status === "cancelada") return void res.status(409).json({ error: "Este boleto já está cancelado." });
     if (b.external_id.startsWith("pending:")) return void res.status(409).json({ error: "Este boleto ainda está sendo emitido." });

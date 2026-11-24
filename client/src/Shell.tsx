@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ROLE_LABELS, type Role, type Session } from './api'
 import type { AppNotification } from './commApi'
+import AccessPage from './AccessPage'
 import AnnouncementsPage from './AnnouncementsPage'
 import ApiPage from './ApiPage'
 import AuditPage from './AuditPage'
@@ -16,6 +17,7 @@ import MaintenancePage from './MaintenancePage'
 import NotificationBell from './NotificationBell'
 import NotificationsPage from './NotificationsPage'
 import PortalPage from './PortalPage'
+import ProfilePage from './ProfilePage'
 import ResourcePage from './ResourcePage'
 import TeamPage from './TeamPage'
 import TemplatesPage from './TemplatesPage'
@@ -51,6 +53,7 @@ const STAFF_NAV: { label?: string; items: NavItem[] }[] = [
       { key: 'finance', label: 'Financeiro', icon: 'wallet' },
       { key: 'maintenance', label: 'Manutenção', icon: 'wrench' },
       { key: 'inspections', label: 'Vistorias', icon: 'camera' },
+      { key: 'access', label: 'Moradores e acessos', icon: 'users' },
       { key: 'announcements', label: 'Comunicados', icon: 'megaphone' },
     ],
   },
@@ -84,7 +87,7 @@ const STAFF_TARGET: Record<string, string> = {
   lease: 'leases',
   announcement: 'announcements',
 }
-const TENANT_TAB: Record<string, string> = { maintenance: 'maintenance', inspection: 'inspections', charge: 'finance', payment: 'finance', lease: 'contract', announcement: 'announcements' }
+const TENANT_TAB: Record<string, string> = { visitor: 'visitors', maintenance: 'maintenance', inspection: 'inspections', charge: 'finance', payment: 'finance', lease: 'contract', announcement: 'announcements' }
 const OWNER_TAB: Record<string, string> = { maintenance: 'maintenance', inspection: 'inspections', lease: 'properties', announcement: 'announcements' }
 
 const isStaffRole = (r: Role) => r === 'admin' || r === 'colaborador'
@@ -182,7 +185,8 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
   const groups = staff ? STAFF_NAV : CLIENT_NAV
 
   let content
-  if (current === 'notifications') content = <NotificationsPage key={`n-${orgKey}`} onOpenItem={openNotification} isStaff={staff} />
+  if (current === 'profile') content = <ProfilePage key={`pf-${orgKey}`} session={session} onSession={onSession} />
+  else if (current === 'notifications') content = <NotificationsPage key={`n-${orgKey}`} onOpenItem={openNotification} isStaff={staff} />
   else if (!staff) content = <PortalPage key={`p-${orgKey}-${portalTarget?.n ?? 0}`} role={session.role} initialTab={portalTarget?.tab} />
   else if (current === 'team' && isAdmin) content = <TeamPage key={`t-${orgKey}`} currentUserId={session.user.id} />
   else if (current === 'intake') content = <IntakePage key={`in-${orgKey}`} onNavigate={navigate} />
@@ -193,6 +197,7 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
   else if (current === 'finance') content = <FinancePage key={`f-${orgKey}`} isAdmin={isAdmin} />
   else if (current === 'maintenance') content = <MaintenancePage key={`m-${orgKey}`} isAdmin={isAdmin} currentUserId={session.user.id} />
   else if (current === 'inspections') content = <InspectionsPage key={`i-${orgKey}`} />
+  else if (current === 'access') content = <AccessPage key={`ac-${orgKey}`} />
   else if (current === 'announcements') content = <AnnouncementsPage key={`a-${orgKey}`} />
   else if (current === 'templates') content = <TemplatesPage key={`tp-${orgKey}`} canDelete={isAdmin} />
   else if (current === 'api') content = <ApiPage key={`api-${orgKey}`} isAdmin={isAdmin} />
@@ -230,13 +235,18 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
           ))}
         </nav>
         <div className="sidebar-foot">
-          <div className="user-card" title={collapsed ? `${session.user.name} (${ROLE_LABELS[session.role]})` : undefined}>
+          <button
+            className={current === 'profile' ? 'user-card active' : 'user-card'}
+            onClick={() => navigate('profile')}
+            aria-current={current === 'profile' ? 'page' : undefined}
+            title={collapsed ? `${session.user.name} (${ROLE_LABELS[session.role]}) — Meu perfil` : 'Meu perfil'}
+          >
             <span className="avatar" aria-hidden="true">{initials(session.user.name)}</span>
             <span className="who">
               <strong>{session.user.name}</strong>
-              <small>{ROLE_LABELS[session.role]}</small>
+              <small>{ROLE_LABELS[session.role]} · Meu perfil</small>
             </span>
-          </div>
+          </button>
           <button className="nav logout" onClick={onLogout} title={collapsed ? 'Sair' : undefined}>
             <Icon name="logout" size={18} />
             <span className="nav-text">Sair</span>

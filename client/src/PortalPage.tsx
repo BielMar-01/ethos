@@ -14,6 +14,7 @@ import {
 } from './api'
 import { brl, date, dateTime } from './format'
 import { ClientAnnouncements, ClientInspections, OwnerMaintenance, TenantMaintenance } from './PortalWork'
+import { HouseholdTab } from './PortalHousehold'
 import { Alert, Loading } from './feedback'
 import Modal from './Modal'
 
@@ -61,7 +62,7 @@ export default function PortalPage({ role, initialTab }: { role: Role; initialTa
 
 // ------------------------------------------------------------------ Inquilino
 
-const TENANT_TABS = ['finance', 'contract', 'maintenance', 'inspections', 'announcements'] as const
+const TENANT_TABS = ['finance', 'contract', 'maintenance', 'inspections', 'household', 'visitors', 'announcements'] as const
 type TenantTab = (typeof TENANT_TABS)[number]
 const OWNER_TABS = ['properties', 'transfers', 'maintenance', 'inspections', 'announcements'] as const
 type OwnerTab = (typeof OWNER_TABS)[number]
@@ -153,11 +154,17 @@ function TenantArea({ initialTab }: { initialTab?: string }) {
         <button role="tab" aria-selected={tab === 'contract'} className={tab === 'contract' ? 'tab active' : 'tab'} onClick={() => setTab('contract')}>Meu contrato</button>
         <button role="tab" aria-selected={tab === 'maintenance'} className={tab === 'maintenance' ? 'tab active' : 'tab'} onClick={() => setTab('maintenance')}>Manutenção</button>
         <button role="tab" aria-selected={tab === 'inspections'} className={tab === 'inspections' ? 'tab active' : 'tab'} onClick={() => setTab('inspections')}>Vistorias</button>
+        <button role="tab" aria-selected={tab === 'household'} className={tab === 'household' ? 'tab active' : 'tab'} onClick={() => setTab('household')}>Moradores</button>
+        <button role="tab" aria-selected={tab === 'visitors'} className={tab === 'visitors' ? 'tab active' : 'tab'} onClick={() => setTab('visitors')}>Visitantes</button>
         <button role="tab" aria-selected={tab === 'announcements'} className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}>Comunicados</button>
       </div>
 
       <div className="no-print">
-        {tab === 'announcements' ? (
+        {tab === 'household' ? (
+          <HouseholdTab kind="residents" />
+        ) : tab === 'visitors' ? (
+          <HouseholdTab kind="visitors" />
+        ) : tab === 'announcements' ? (
           <ClientAnnouncements />
         ) : tab === 'maintenance' ? (
           <TenantMaintenance leases={leases} />
