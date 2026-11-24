@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { Router, type Request } from "express";
-import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { db } from "./db.js";
 import { createSession, requireAuth } from "./auth.js";
@@ -21,6 +20,8 @@ const CHALLENGE_TTL_MIN = 5;
 const limiter = new SharedRateLimiter("passkey", 30, 15 * 60 * 1000);
 const oauthLimiter = new SharedRateLimiter("oauth", 20, 15 * 60 * 1000);
 const hash = (t: string) => crypto.createHash("sha256").update(t).digest("hex");
+// @simplewebauthn/server é ESM: na Vercel o require() de ESM não existe, então só se carrega com import() dinâmico, na hora de usar.
+const webauthn = () => import("@simplewebauthn/server");
 
 /** Origem e domínio (rpID) esperados: a origem do próprio pedido, desde que seja o host do servidor ou APP_URL. */
 function relyingParty(req: Request): { origin: string; rpID: string } {
@@ -89,6 +90,7 @@ passkeysRouter.post("/profile/passkeys/options", async (req, res) => {
   const existing = await db.query<{ id: string; transports: string | null }>("SELECT id, transports FROM webauthn_credentials WHERE user_id = $1", [me.id]);
   if (existing.length >= 10) return void res.status(409).json({ error: "Limite de 10 passkeys. Remova alguma." });
   const { rpID } = relyingParty(req);
+  const { generateRegistrationOptions } = await webauthn();
   const options = await generateRegistrationOptions({
     rpName: "Ethos",
     rpID,
@@ -109,6 +111,7 @@ passkeysRouter.post("/profile/passkeys/verify", async (req, res) => {
   const name = typeof req.body?.name === "string" && req.body.name.trim() ? req.body.name.trim().slice(0, 60) : "Minha passkey";
   const { origin, rpID } = relyingParty(req);
   try {
+    const { verifyRegistrationResponse } = await webauthn();
     const v = await verifyRegistrationResponse({ response: req.body.response as RegistrationResponseJSON, expectedChallenge: ch.challenge, expectedOrigin: origin, expectedRPID: rpID });
     if (!v.verified || !v.registrationInfo) return void res.status(400).json({ error: "Não foi possível validar a passkey." });
     const c = v.registrationInfo.credential;
@@ -145,6 +148,7 @@ passkeysRouter.post("/auth/passkey/options", async (req, res) => {
   }
   const { rpID } = relyingParty(req);
   // Sem e-mail (ou sem passkeys cadastradas): pede qualquer credencial descobrível, sem revelar se o e-mail existe.
+  const { generateAuthenticationOptions } = await webauthn();
   const options = await generateAuthenticationOptions({ rpID, userVerification: "preferred", allowCredentials: allow && allow.length ? allow : undefined });
   res.json({ options, token: await saveChallenge("login", options.challenge, userId) });
 });
@@ -161,6 +165,7 @@ passkeysRouter.post("/auth/passkey/verify", async (req, res) => {
   if (!cred || (ch.user_id && ch.user_id !== cred.user_id)) return void res.status(401).json({ error: "Passkey não reconhecida." });
   const { origin, rpID } = relyingParty(req);
   try {
+    const { verifyAuthenticationResponse } = await webauthn();
     const v = await verifyAuthenticationResponse({
       response,
       expectedChallenge: ch.challenge,

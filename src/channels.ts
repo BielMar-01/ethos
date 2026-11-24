@@ -1,5 +1,4 @@
 import { Router } from "express";
-import webpush from "web-push";
 import { db } from "./db.js";
 import { requireAuth } from "./auth.js";
 import { appUrl } from "./authProvider.js";
@@ -53,6 +52,8 @@ async function sendWhatsApp(phone: string, text: string): Promise<void> {
 
 type PushSender = (sub: { endpoint: string; keys: { p256dh: string; auth: string } }, payload: string) => Promise<void>;
 let pushSender: PushSender = async (sub, payload) => {
+  // web-push é pacote ESM: na Vercel o require() de ESM não existe, então carrega com import() dinâmico, só quando há push a enviar.
+  const webpush = (await import("web-push")).default;
   webpush.setVapidDetails(process.env.VAPID_SUBJECT ?? `mailto:avisos@${new URL(appUrl()).hostname}`, process.env.VAPID_PUBLIC_KEY!, process.env.VAPID_PRIVATE_KEY!);
   await webpush.sendNotification(sub, payload, { TTL: 60 * 60 * 24 });
 };
