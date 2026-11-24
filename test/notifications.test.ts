@@ -155,9 +155,9 @@ describe("notificações — caixa de entrada e preferências", () => {
   it("respeita a preferência por categoria", async () => {
     const w = await world("5");
     const prefs = (await w.tenant.call("GET", "/api/notifications/preferences")).body;
-    assert.equal(prefs.items.length, 6);
+    assert.equal(prefs.items.length, 9);
     assert.ok(prefs.items.every((p: { in_app: boolean }) => p.in_app));
-    assert.deepEqual(prefs.channels, { in_app: true, email: false, whatsapp: false, push: false });
+    assert.deepEqual(prefs.channels, { in_app: true, email: true, whatsapp: false, push: false }, "e-mail existe (provedor em memória); WhatsApp e push dependem de configuração");
 
     assert.equal((await w.tenant.call("PUT", "/api/notifications/preferences", { category: "vistoria", in_app: false })).status, 204);
     assert.equal((await w.tenant.call("PUT", "/api/notifications/preferences", { category: "xx", in_app: false })).status, 400);

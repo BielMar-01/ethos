@@ -135,7 +135,8 @@ export async function loadAuth(req: Request, res: Response, next: NextFunction):
        JOIN users u ON u.id = s.user_id
        JOIN organizations o ON o.id = s.organization_id
        JOIN organization_members m ON m.user_id = u.id AND m.organization_id = o.id
-       WHERE s.id = $1 AND s.expires_at > now() AND u.deleted_at IS NULL`,
+       WHERE s.id = $1 AND s.expires_at > now() AND u.deleted_at IS NULL
+         AND (o.session_idle_minutes IS NULL OR s.last_seen_at > now() - make_interval(mins => o.session_idle_minutes))`,
       [id],
     );
     if (row) {

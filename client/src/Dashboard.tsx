@@ -3,6 +3,7 @@ import { comm, type DashboardData } from './commApi'
 import { brl } from './format'
 import Icon from './Icon'
 import { Alert, Loading } from './feedback'
+import KpiPanel from './Kpis'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -114,6 +115,8 @@ export default function Dashboard({ name, onNavigate }: { name: string; onNaviga
           </div>
         </div>
       </div>
+
+      {!empty && <KpiPanel />}
     </section>
   )
 }

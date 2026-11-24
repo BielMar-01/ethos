@@ -5,7 +5,8 @@ import PasswordInput from './PasswordInput'
 import LandingPage, { PublicLayout } from './LandingPage'
 import ApiPage from './ApiPage'
 import Shell from './Shell'
-import { go, isStandalone, routeFromHash, type PublicRoute } from './routes'
+import { go, isStandalone, listingToken, routeFromHash, type PublicRoute } from './routes'
+import { ListingPage, SignPage } from './PublicPages'
 import './App.css'
 import './layout.css'
 import './ux.css'
@@ -13,6 +14,7 @@ import './public.css'
 import './shell.css'
 import './modal.css'
 import { Alert, Loading, toast } from './feedback'
+import { startAuthentication } from '@simplewebauthn/browser'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -21,6 +23,8 @@ type Entry =
   | { kind: 'reset'; accessToken: string }
   | { kind: 'emailChange'; accessToken: string }
   | { kind: 'signup' }
+  | { kind: 'oauth'; accessToken: string }
+  | { kind: 'sign'; token: string }
   | { kind: 'linkError'; text: string }
   | { kind: 'invite'; token: string }
   | { kind: 'none' }
@@ -35,11 +39,16 @@ function readEntry(): Entry {
     entry = { kind: 'emailChange', accessToken: hash.get('access_token')! }
   } else if (hash.get('type') === 'signup' && hash.get('access_token')) {
     entry = { kind: 'signup' }
+  } else if (hash.get('access_token') && !hash.get('type')) {
+    // Volta do login social (Google/Microsoft pelo Supabase): o access_token chega no hash.
+    entry = { kind: 'oauth', accessToken: hash.get('access_token')! }
   } else if (hash.get('error')) {
     entry = {
       kind: 'linkError',
       text: 'Este link é inválido ou expirou. Solicite um novo (recuperação de senha, e-mail ou confirmação de cadastro).',
     }
+  } else if (query.get('sign')) {
+    entry = { kind: 'sign', token: query.get('sign')! }
   } else if (query.get('invite')) {
     entry = { kind: 'invite', token: query.get('invite')! }
   }
@@ -74,7 +83,7 @@ function Page({ title, children, onSubmit }: { title: string; children: React.Re
   )
 }
 
-function AuthForm({ onAuth, notice, initialMode = 'login' }: { onAuth: (s: Session) => void; notice?: string; initialMode?: 'login' | 'register' }) {
+function AuthForm({ onAuth, notice, initialMode = 'login', initialChallenge }: { onAuth: (s: Session) => void; notice?: string; initialMode?: 'login' | 'register'; initialChallenge?: string }) {
   const [mode, setMode] = useState<'login' | 'register' | 'forgot'>(initialMode)
   const [name, setName] = useState('')
   const [organization, setOrganization] = useState('')
@@ -84,8 +93,29 @@ function AuthForm({ onAuth, notice, initialMode = 'login' }: { onAuth: (s: Sessi
   const [info, setInfo] = useState(notice ?? '')
   const [busy, setBusy] = useState(false)
   // Verificação em duas etapas: depois da senha certa o servidor devolve um desafio e espera o código.
-  const [challenge, setChallenge] = useState<string | null>(null)
+  const [challenge, setChallenge] = useState<string | null>(initialChallenge ?? null)
   const [code, setCode] = useState('')
+  const [social, setSocial] = useState<{ providers: string[]; authorize_url: string | null; redirect_to: string } | null>(null)
+
+  useEffect(() => {
+    api.providers().then(setSocial).catch(() => {})
+  }, [])
+
+  async function passkey() {
+    setError('')
+    setBusy(true)
+    try {
+      const o = await api.passkeyOptions(email)
+      const response = await startAuthentication({ optionsJSON: o.options as Parameters<typeof startAuthentication>[0]['optionsJSON'] })
+      const r = await api.passkeyVerify(o.token, response)
+      if ('mfa_required' in r) setChallenge(r.mfa_token)
+      else onAuth(r)
+    } catch (err) {
+      setError(err instanceof Error && err.name === 'NotAllowedError' ? 'Entrada com passkey cancelada.' : message(err))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   function switchMode(next: typeof mode) {
     setError('')
@@ -205,6 +235,16 @@ function AuthForm({ onAuth, notice, initialMode = 'login' }: { onAuth: (s: Sessi
       <button type="submit" className="primary" disabled={busy}>
         {mode === 'login' ? 'Entrar' : mode === 'register' ? 'Cadastrar' : 'Enviar link de recuperação'}
       </button>
+      {mode === 'login' && typeof window !== 'undefined' && 'PublicKeyCredential' in window && (
+        <button type="button" disabled={busy} onClick={passkey}>
+          Entrar com passkey
+        </button>
+      )}
+      {mode === 'login' && social?.authorize_url && social.providers.map((p) => (
+        <a key={p} className="button" href={`${social.authorize_url}?provider=${p}&redirect_to=${encodeURIComponent(social.redirect_to)}`}>
+          Entrar com {p === 'google' ? 'Google' : 'Microsoft'}
+        </a>
+      ))}
       {mode === 'login' && /Confirme o seu e-mail/.test(error) && email && (
         <button type="button" className="link" onClick={resend}>
           Reenviar o link de confirmação
@@ -267,6 +307,18 @@ function ResetPassword({ accessToken, onDone }: { accessToken: string; onDone: (
       </button>
     </Page>
   )
+}
+
+/** Volta do login social: troca o token do provedor por uma sessão do app (ou pelo desafio do 2FA). */
+function OAuthLanding({ accessToken, onSession, onChallenge, onError }: { accessToken: string; onSession: (s: Session) => void; onChallenge: (t: string) => void; onError: (text: string) => void }) {
+  useEffect(() => {
+    api
+      .oauth(accessToken)
+      .then((r) => ('mfa_required' in r ? onChallenge(r.mfa_token) : onSession(r)))
+      .catch((err) => onError(message(err)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken])
+  return <Loading label="Entrando…" />
 }
 
 /** Destino do link de confirmação de e-mail: troca de e-mail (espelha no app) ou cadastro. */
@@ -373,6 +425,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState('')
+  const [oauthChallenge, setOauthChallenge] = useState<string | undefined>()
   const [route, setRoute] = useState<PublicRoute>(() => routeFromHash(window.location.hash))
 
   useEffect(() => {
@@ -413,6 +466,29 @@ export default function App() {
         onDone={() => {
           setSession(null)
           setNotice('Senha alterada. Entre com a nova senha.')
+          setEntry({ kind: 'none' })
+          go('login')
+        }}
+      />
+    )
+  }
+  if (entry.kind === 'sign') return <SignPage token={entry.token} />
+  if (route === 'listing' && listingToken(window.location.hash)) return <ListingPage token={listingToken(window.location.hash)!} />
+  if (entry.kind === 'oauth') {
+    return (
+      <OAuthLanding
+        accessToken={entry.accessToken}
+        onSession={(s) => {
+          authenticated(s)
+          setEntry({ kind: 'none' })
+        }}
+        onChallenge={(token) => {
+          setOauthChallenge(token)
+          setEntry({ kind: 'none' })
+          go('login')
+        }}
+        onError={(text) => {
+          setNotice(text)
           setEntry({ kind: 'none' })
           go('login')
         }}
@@ -463,7 +539,7 @@ export default function App() {
       )
     }
     if (route === 'login' || route === 'register') {
-      return <AuthForm key={route} initialMode={route} onAuth={authenticated} notice={notice} />
+      return <AuthForm key={route} initialMode={route} onAuth={authenticated} notice={notice} initialChallenge={oauthChallenge} />
     }
     return <LandingPage />
   }

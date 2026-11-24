@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { prepareImage } from './photos'
 import { request } from './api'
 import { Alert, Empty, Loading, ask, errorText, toast } from './feedback'
 import { date, dateTime } from './format'
@@ -301,6 +302,13 @@ export interface Visitor {
   vehicle_plate: string | null
   valid_from: string
   valid_until: string
+  weekdays: string | null
+  time_from: string | null
+  time_to: string | null
+  expected_time: string | null
+  max_stay_minutes: number | null
+  has_photo: boolean
+  photo_consent_at: string | null
   access_code: string
   status: string
   phase: string
@@ -409,6 +417,11 @@ function VisitorForm({ mode, options, visitor, onClose, onDone }: { mode: Mode; 
   const [from, setFrom] = useState(d10(visitor?.valid_from) || todayIso())
   const [until, setUntil] = useState(d10(visitor?.valid_until) || todayIso())
   const [notes, setNotes] = useState(visitor?.notes ?? '')
+  const [days, setDays] = useState<string[]>(visitor?.weekdays ? visitor.weekdays.split(',') : [])
+  const [tFrom, setTFrom] = useState(visitor?.time_from ?? '')
+  const [tTo, setTTo] = useState(visitor?.time_to ?? '')
+  const [expected, setExpected] = useState(visitor?.expected_time ?? '')
+  const [maxStay, setMaxStay] = useState(visitor?.max_stay_minutes ? String(visitor.max_stay_minutes) : '')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -416,7 +429,10 @@ function VisitorForm({ mode, options, visitor, onClose, onDone }: { mode: Mode; 
     e.preventDefault()
     setBusy(true)
     setError('')
-    const body: Record<string, unknown> = { name, category, document, phone, vehicle_plate: plate, valid_from: from, valid_until: until, notes }
+    const body: Record<string, unknown> = {
+      name, category, document, phone, vehicle_plate: plate, valid_from: from, valid_until: until, notes,
+      weekdays: days, time_from: tFrom || null, time_to: tTo || null, expected_time: expected || null, max_stay_minutes: maxStay ? Number(maxStay) : null,
+    }
     try {
       let r: { item: Visitor }
       if (visitor) r = await request(`${prefix(mode)}/visitors/${visitor.id}`, json('PUT', body))
@@ -480,6 +496,35 @@ function VisitorForm({ mode, options, visitor, onClose, onDone }: { mode: Mode; 
             Observações para a portaria
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} rows={2} />
           </label>
+          <fieldset className="mode-pick wide">
+            <legend>Visita recorrente (opcional)</legend>
+            <div className="inline" role="group" aria-label="Dias da semana">
+              {['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'].map((d, i) => (
+                <label key={d} className="check">
+                  <input type="checkbox" checked={days.includes(String(i))} onChange={(e) => setDays((cur) => (e.target.checked ? [...cur, String(i)] : cur.filter((x) => x !== String(i))))} /> {d}
+                </label>
+              ))}
+            </div>
+            <span className="muted small">Nenhum dia marcado = todos os dias do período.</span>
+          </fieldset>
+          <label>
+            Pode entrar a partir de
+            <input type="time" value={tFrom} onChange={(e) => setTFrom(e.target.value)} />
+          </label>
+          <label>
+            Pode entrar até
+            <input type="time" value={tTo} onChange={(e) => setTTo(e.target.value)} />
+          </label>
+          <label>
+            Hora prevista da chegada
+            <input type="time" value={expected} onChange={(e) => setExpected(e.target.value)} />
+            <span className="muted small">Avisamos se não chegar até 1 h depois.</span>
+          </label>
+          <label>
+            Permanência máxima (minutos)
+            <input type="number" min={10} max={1440} value={maxStay} onChange={(e) => setMaxStay(e.target.value)} placeholder="720" />
+            <span className="muted small">Avisamos se passar disso.</span>
+          </label>
         </div>
         <p className="muted small">Para uma visita só, deixe as duas datas iguais. Para prestadores (diarista, obra), escolha o período — até 1 ano.</p>
         {error && <Alert>{error}</Alert>}
@@ -521,6 +566,38 @@ function VisitorDetail({ mode, visitor, onClose, onChanged, onEdit }: { mode: Mo
     }
   }
   const active = v.status === 'autorizado'
+  const photo = useRef<HTMLInputElement>(null)
+
+  async function sendPhoto(file: File | undefined) {
+    if (!file) return
+    if (!(await ask('O visitante autorizou ser fotografado? A foto fica privada, só a equipe e o morador responsável a veem, e é apagada 30 dias depois do fim da autorização.', { title: 'Consentimento', confirmLabel: 'Sim, autorizou' }))) return
+    setBusy(true)
+    setError('')
+    try {
+      const small = await prepareImage(file, { maxBytes: 900 * 1024, maxSide: 1024 })
+      const res = await fetch(`/api/visitors/${v.id}/photo?consent=1`, { method: 'PUT', headers: { 'Content-Type': small.type || 'image/jpeg' }, body: small })
+      if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'Não foi possível enviar a foto.')
+      setV({ ...v, has_photo: true, photo_consent_at: new Date().toISOString() })
+      toast.success('Foto registrada.')
+      onChanged()
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function removePhoto() {
+    setBusy(true)
+    try {
+      await request(`/api/visitors/${v.id}/photo`, { method: 'DELETE' })
+      setV({ ...v, has_photo: false, photo_consent_at: null })
+      onChanged()
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <Modal
@@ -533,6 +610,9 @@ function VisitorDetail({ mode, visitor, onClose, onChanged, onEdit }: { mode: Mo
           <button onClick={onClose}>Fechar</button>
           {active && !v.inside && <button onClick={() => onEdit(v)} disabled={busy}>Editar</button>}
           {active && !v.inside && <button className="danger" onClick={() => act('cancel', {}, 'Autorização cancelada.', 'Cancelar esta autorização? O visitante não poderá mais entrar.')} disabled={busy}>Cancelar autorização</button>}
+          {active && <button onClick={() => act('renew', {}, 'Autorização renovada por mais 30 dias.')} disabled={busy}>Renovar +30 dias</button>}
+          {staff && active && <button onClick={() => photo.current?.click()} disabled={busy}>{v.has_photo ? 'Trocar foto' : 'Tirar/enviar foto'}</button>}
+          {staff && v.has_photo && <button onClick={removePhoto} disabled={busy}>Remover foto</button>}
           {staff && v.status === 'bloqueado' && <button onClick={() => act('unblock', {}, 'Visitante desbloqueado.')} disabled={busy}>Desbloquear</button>}
           {staff && v.status !== 'bloqueado' && !v.inside && <button className="danger" onClick={() => act('block', {}, 'Visitante bloqueado.', 'Bloquear este visitante? A portaria será impedida de liberar a entrada.')} disabled={busy}>Bloquear</button>}
           {staff && active && v.inside && <button className="primary" onClick={() => act('exit', {}, 'Saída registrada.')} disabled={busy}>Registrar saída</button>}
@@ -541,6 +621,7 @@ function VisitorDetail({ mode, visitor, onClose, onChanged, onEdit }: { mode: Mo
       }
     >
       {error && <Alert>{error}</Alert>}
+      <input ref={photo} type="file" accept="image/*" capture="environment" hidden aria-label="Foto do visitante" onChange={(e) => { void sendPhoto(e.target.files?.[0]); e.target.value = '' }} />
       <dl className="view-grid">
         <div><dt>Situação</dt><dd>{phaseBadge(v)}</dd></div>
         <div><dt>Código de acesso</dt><dd><code className="access-code">{v.access_code}</code></dd></div>
@@ -549,6 +630,10 @@ function VisitorDetail({ mode, visitor, onClose, onChanged, onEdit }: { mode: Mo
         {v.document && <div><dt>Documento</dt><dd>{v.document}</dd></div>}
         {v.phone && <div><dt>Telefone</dt><dd>{v.phone}</dd></div>}
         {v.vehicle_plate && <div><dt>Placa</dt><dd>{v.vehicle_plate}</dd></div>}
+        {(v.weekdays || v.time_from) && <div className="wide"><dt>Regra de acesso</dt><dd>{v.weekdays ? v.weekdays.split(',').map((d) => ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'][Number(d)]).join(', ') : 'Todos os dias'}{v.time_from ? ` · das ${v.time_from} às ${v.time_to}` : ''}</dd></div>}
+        {v.expected_time && <div><dt>Hora prevista</dt><dd>{v.expected_time}</dd></div>}
+        {v.max_stay_minutes && <div><dt>Permanência máxima</dt><dd>{v.max_stay_minutes} min</dd></div>}
+        {v.has_photo && <div className="wide"><dt>Foto</dt><dd><img className="visitor-photo" alt={`Foto de ${v.name}`} src={`${prefix(mode)}/visitors/${v.id}/photo?${v.photo_consent_at ?? ''}`} /></dd></div>}
         {v.tenant_names && <div><dt>Morador responsável</dt><dd>{v.tenant_names}</dd></div>}
         {v.notes && <div className="wide"><dt>Observações</dt><dd>{v.notes}</dd></div>}
         {v.created_by_name && <div className="wide"><dt>Autorizado por</dt><dd>{v.created_by_name}{v.created_by_role === 'inquilino' ? ' (morador)' : ' (equipe)'}</dd></div>}

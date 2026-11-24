@@ -65,7 +65,7 @@ test.describe("celular", () => {
 
   test("listas e formulários não estouram a largura da tela", async ({ page }) => {
     await openPanel(page);
-    for (const label of ["Proprietários", "Contratos", "Financeiro", "Manutenção", "Importar dados", "Registros", "Moradores e acessos"]) {
+    for (const label of ["Proprietários", "Contratos", "Financeiro", "Manutenção", "Importar dados", "Registros", "Moradores e acessos", "Relatórios", "Captação", "Prestadores e preventiva", "Ocorrências", "Enquetes", "Documentos dos imóveis"]) {
       await page.getByRole("button", { name: /menu/i }).first().click();
       await page.getByRole("complementary", { name: "Menu principal" }).getByRole("button", { name: label, exact: true }).click();
       await expect(page.getByRole("heading", { name: new RegExp(label.split(" ")[0]!) }).first()).toBeVisible();
@@ -83,7 +83,7 @@ test.describe("celular", () => {
 
   test("inquilino: abas Moradores e Visitantes cabem no celular", async ({ page }) => {
     await openPanel(page, TENANT);
-    for (const tab of ["Moradores", "Visitantes"]) {
+    for (const tab of ["Moradores", "Visitantes", "Encomendas", "Ocorrências", "Enquetes"]) {
       await page.getByRole("tab", { name: tab }).click();
       await expect(page.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
       expect(await noHorizontalScroll(page), `rolagem lateral em ${tab}`).toBe(true);

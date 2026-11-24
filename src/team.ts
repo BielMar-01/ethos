@@ -5,6 +5,7 @@ import { createSession, currentSessionId, requireAuth, requireRole } from "./aut
 import { AuthProviderError, appUrl, getAuthProvider } from "./authProvider.js";
 import { parseId } from "./crud.js";
 import { SharedRateLimiter } from "./ratelimit.js";
+import { passwordProblem } from "./security.js";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
@@ -181,6 +182,13 @@ teamRouter.post("/members/:userId/password-reset", ...adminOnly, async (req, res
         return;
       }
       const password = generated ? generateTempPassword() : (typed as string);
+      if (!generated) {
+        const weak = await passwordProblem(password, member.email);
+        if (weak) {
+          res.status(400).json({ error: weak });
+          return;
+        }
+      }
       try {
         await getAuthProvider().setPassword(member.auth_id, password);
       } catch (err) {
@@ -376,6 +384,11 @@ teamRouter.post("/invitations/by-token/:token/accept", async (req, res) => {
         return;
       }
       userName = name.trim().slice(0, 200);
+      const weak = await passwordProblem(password, invite.email);
+      if (weak) {
+        res.status(400).json({ error: weak });
+        return;
+      }
       createdAuthId = (await provider.createUser(invite.email, password)).id;
     }
 

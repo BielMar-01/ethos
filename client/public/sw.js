@@ -2,7 +2,7 @@
  * Regras de segurança: NADA de /api é guardado (dados de pessoas, contratos e financeiro nunca ficam em cache do
  * navegador); só a "casca" do app (HTML, JS, CSS, fontes, ícones) para abrir rápido e mostrar a tela de "sem conexão".
  * Ao publicar uma versão nova, mude VERSION para renovar o cache. */
-const VERSION = 'ethos-v1'
+const VERSION = 'ethos-v2'
 const SHELL = ['/', '/offline.html', '/manifest.webmanifest', '/favicon.svg', '/icons/icon-192.png', '/icons/icon-512.png']
 
 self.addEventListener('install', (event) => {
@@ -52,6 +52,28 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => cached)
       return cached || network
+    }),
+  )
+})
+
+// Web Push: mostra o aviso e, ao clicar, abre/foca o app.
+self.addEventListener('push', (event) => {
+  let data = { title: 'Ethos', body: '', url: '/' }
+  try {
+    data = { ...data, ...event.data.json() }
+  } catch {
+    /* sem corpo */
+  }
+  event.waitUntil(self.registration.showNotification(data.title, { body: data.body, icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', data: { url: data.url } }))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = (event.notification.data && event.notification.data.url) || '/'
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const open = list.find((c) => 'focus' in c)
+      return open ? open.focus() : self.clients.openWindow(url)
     }),
   )
 })

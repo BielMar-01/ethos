@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { json, request } from './api'
 import { KeysPanel } from './ApiPage'
+import Monitoring from './Monitoring'
 import { Alert, Loading, ask, errorText, toast } from './feedback'
 import { dateTime } from './format'
 import Icon, { type IconName } from './Icon'
@@ -146,6 +147,8 @@ export default function IntegrationsPage() {
         <strong>Em breve</strong>
         <span className="muted">Boleto/Pix com baixa automática, WhatsApp e e-mail, escrita via API.</span>
       </div>
+
+      <Monitoring />
 
       {open === 'asaas' && <AsaasModal conn={data.asaas} secretsReady={data.secrets_ready} onClose={close} />}
       {open === 'ai' && <AiModal initial={data.ai} secretsReady={data.secrets_ready} onClose={close} />}

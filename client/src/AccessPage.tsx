@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { PortariaPanel, ResidentsPanel, VisitorsPanel, useLeaseOptions } from './HouseholdPanels'
+import { AccessReport, ParcelsPanel } from './AccessExtras'
 
-type Tab = 'portaria' | 'visitors' | 'residents'
+type Tab = 'portaria' | 'visitors' | 'parcels' | 'residents' | 'report'
 
 /** Moradores e acessos (equipe): portaria do dia, autorizações de visitantes e cadastro de moradores. */
 export default function AccessPage() {
   const [tab, setTab] = useState<Tab>('portaria')
   const options = useLeaseOptions('staff')
-  const tabs: [Tab, string][] = [['portaria', 'Portaria'], ['visitors', 'Visitantes'], ['residents', 'Moradores']]
+  const tabs: [Tab, string][] = [['portaria', 'Portaria'], ['visitors', 'Visitantes'], ['parcels', 'Encomendas'], ['residents', 'Moradores'], ['report', 'Relatório de acessos']]
   return (
     <section>
       <div className="page-head">
@@ -21,7 +22,9 @@ export default function AccessPage() {
       </div>
       {tab === 'portaria' && <PortariaPanel />}
       {tab === 'visitors' && <VisitorsPanel mode="staff" options={options} />}
+      {tab === 'parcels' && <ParcelsPanel />}
       {tab === 'residents' && <ResidentsPanel mode="staff" options={options} />}
+      {tab === 'report' && <AccessReport />}
     </section>
   )
 }

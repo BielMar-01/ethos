@@ -5,6 +5,7 @@ import { createSession, requireAuth } from "./auth.js";
 import { decryptSecret, encryptSecret, secretsReady } from "./secrets.js";
 import { SharedRateLimiter } from "./ratelimit.js";
 import { confirmPassword } from "./reauth.js";
+import { noteLogin } from "./security.js";
 import { generateRecoveryCodes, generateTotpSecret, hashRecovery, otpauthUri, verifyTotp } from "./totp.js";
 
 /**
@@ -107,6 +108,7 @@ mfaRouter.post("/auth/mfa", async (req: Request, res) => {
   );
   if (!who) return void res.status(403).json({ error: "Usuário sem organização" });
   await createSession(res, who.id, ch.organization_id, req);
+  await noteLogin(req, who.id, ch.organization_id);
   res.json({ user: { id: who.id, name: who.name, email: who.email }, organization: { id: ch.organization_id, name: who.org_name }, role: who.role });
 });
 

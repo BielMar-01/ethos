@@ -103,15 +103,32 @@ export function BoletoDetail({ boleto, isAdmin, onClose, onChanged }: { boleto: 
     }
   }
   const manual = b.provider === 'manual'
-  async function markPaid() {
-    if (!(await ask('Marcar este boleto como pago? Isso só registra a informação no boleto. Para dar baixa na cobrança e emitir o recibo, registre o recebimento em Pagamentos.'))) return
+  async function resend() {
     setBusy(true)
     setError('')
     try {
-      const r = await request<{ item: Boleto }>(`/api/boletos/${b.id}/paid`, json('POST'))
+      const r = await request<{ notified_users: number; direct_emails: number }>(`/api/boletos/${b.id}/resend`, json('POST'))
+      toast.success(r.notified_users + r.direct_emails === 0 ? 'Nenhum destinatário: o locatário não tem acesso nem e-mail cadastrado.' : `Segunda via enviada (${r.notified_users} pelo app/e-mail de acesso, ${r.direct_emails} pelo e-mail do cadastro).`)
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function markPaid(register: boolean) {
+    const msg = register
+      ? 'Marcar como pago E registrar o recebimento? Será emitido o recibo e dada a baixa na cobrança (pelo valor do boleto, limitado ao saldo).'
+      : 'Marcar este boleto como pago? Isso só registra a informação no boleto. Para dar baixa na cobrança e emitir o recibo, registre o recebimento em Pagamentos.'
+    if (!(await ask(msg, { title: 'Marcar como pago', confirmLabel: register ? 'Pago + recibo' : 'Marcar como pago' }))) return
+    setBusy(true)
+    setError('')
+    try {
+      const r = await request<{ item: Boleto; payment: { receipt_number: number } | null; payment_error: string | null }>(`/api/boletos/${b.id}/paid`, json('POST', register ? { register_payment: true } : undefined))
       setB(r.item)
       onChanged()
-      toast.success('Boleto marcado como pago. Registre o recebimento em Pagamentos.')
+      if (r.payment) toast.success(`Boleto pago e recebimento registrado (recibo nº ${r.payment.receipt_number}).`)
+      else if (r.payment_error) toast.info(`Boleto marcado como pago, mas: ${r.payment_error}`)
+      else toast.success('Boleto marcado como pago. Registre o recebimento em Pagamentos.')
     } catch (e) {
       setError(errorText(e))
     } finally {
@@ -147,7 +164,9 @@ export function BoletoDetail({ boleto, isAdmin, onClose, onChanged }: { boleto: 
           <button onClick={onClose}>Fechar</button>
           {manual && b.status !== 'cancelada' && <button onClick={() => window.print()}>Imprimir guia</button>}
           {manual && isOpen(b) && <button onClick={() => setEditing(true)} disabled={busy}>Editar</button>}
-          {manual && isOpen(b) && <button onClick={markPaid} disabled={busy}>Marcar como pago</button>}
+          {isOpen(b) && <button onClick={resend} disabled={busy}>Reenviar 2ª via</button>}
+          {manual && isOpen(b) && <button onClick={() => markPaid(false)} disabled={busy}>Marcar como pago</button>}
+          {manual && isOpen(b) && <button className="primary" onClick={() => markPaid(true)} disabled={busy}>Pago + registrar recebimento</button>}
           {!manual && isOpen(b) && <button onClick={refresh} disabled={busy}>Atualizar situação</button>}
           {isAdmin && isOpen(b) && <button className="danger" onClick={cancel} disabled={busy}>Cancelar boleto</button>}
           {(b.invoice_url ?? (manual ? b.bank_slip_url : null)) && b.status !== 'cancelada' && (

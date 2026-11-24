@@ -1,7 +1,7 @@
 // Notificações, comunicados e painel: tipos e chamadas à API.
 import { json, request } from './api'
 
-export type NotifCategory = 'financeiro' | 'manutencao' | 'vistoria' | 'contrato' | 'comunicado' | 'acesso'
+export type NotifCategory = 'financeiro' | 'manutencao' | 'vistoria' | 'contrato' | 'comunicado' | 'acesso' | 'seguranca' | 'encomenda' | 'ocorrencia'
 
 export interface AppNotification {
   id: number
@@ -15,10 +15,21 @@ export interface AppNotification {
   created_at: string
 }
 
+export type Channel = 'in_app' | 'email' | 'whatsapp' | 'push'
 export interface NotifPref {
   category: NotifCategory
   label: string
   in_app: boolean
+  email: boolean
+  whatsapp: boolean
+  push: boolean
+}
+export interface PrefsResponse {
+  items: NotifPref[]
+  /** O que o servidor consegue enviar (depende de provedor configurado). */
+  channels: Record<Channel, boolean>
+  whatsapp_opt_in: boolean
+  has_phone: boolean
 }
 
 export type Audience = 'todos' | 'inquilinos' | 'proprietarios' | 'imovel'
@@ -64,10 +75,10 @@ export const comm = {
   unreadCount: () => request<{ unread: number }>('/api/notifications/count'),
   markRead: (id: number) => request<void>(`/api/notifications/${id}/read`, { method: 'POST' }),
   readAll: () => request<void>('/api/notifications/read-all', { method: 'POST' }),
-  preferences: () =>
-    request<{ items: NotifPref[]; channels: Record<'in_app' | 'email' | 'whatsapp' | 'push', boolean> }>('/api/notifications/preferences'),
-  setPreference: (category: NotifCategory, inApp: boolean) =>
-    request<void>('/api/notifications/preferences', json('PUT', { category, in_app: inApp })),
+  preferences: () => request<PrefsResponse>('/api/notifications/preferences'),
+  setPreference: (category: NotifCategory, channel: Channel, value: boolean) =>
+    request<void>('/api/notifications/preferences', json('PUT', { category, [channel]: value })),
+  setWhatsAppConsent: (optIn: boolean) => request<void>('/api/notifications/whatsapp-consent', json('PUT', { opt_in: optIn })),
   runReminders: () =>
     request<{ dueSoon: number; overdue: number; overdueDigest: number; leasesEnding: number }>('/api/reminders/run', { method: 'POST' }),
 

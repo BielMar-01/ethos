@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import { db, isUniqueViolation, transaction } from "./db.js";
 import { SESSION_COOKIE, currentSessionId, requireAuth } from "./auth.js";
+import { describeAgent } from "./agent.js";
+import { passwordProblem, securityAlert } from "./security.js";
 import { AuthProviderError, appUrl, getAuthProvider } from "./authProvider.js";
 import { isRealDate } from "./crud.js";
 import { formatDocument, formatPhone } from "./brFormat.js";
@@ -120,7 +122,21 @@ profileRouter.post("/profile/email", async (req, res) => {
     throw err;
   }
   await db.query("UPDATE users SET pending_email = $1, pending_email_at = now() WHERE id = $2", [email, req.auth!.user.id]);
+  // Quem manda o link de troca é o provedor; o e-mail ATUAL também é avisado, para a pessoa poder reagir se não foi ela.
+  await securityAlert(req.auth!.user.id, req.auth!.organization.id, "Pedido de troca de e-mail", `Foi pedido para trocar o e-mail de acesso para ${email}. Se não foi você, cancele em Meu perfil e troque a senha.`);
   res.status(202).json({ user: await load(req.auth!.user.id), message: `Enviamos um link de confirmação para ${email}. O e-mail de acesso só muda depois que você clicar nele.` });
+});
+
+/**
+ * Cancela a troca de e-mail pendente. Se o link já tinha sido confirmado no provedor, ele volta ao e-mail do app
+ * (a próxima tentativa de usar o link antigo é recusada por não haver mais pedido).
+ */
+profileRouter.delete("/profile/email", async (req, res) => {
+  const [u] = await db.query<{ email: string; auth_id: string; pending_email: string | null }>("SELECT email, auth_id, pending_email FROM users WHERE id = $1", [req.auth!.user.id]);
+  if (!u?.pending_email) return void res.status(404).json({ error: "Não há troca de e-mail pendente." });
+  await db.query("UPDATE users SET pending_email = NULL, pending_email_at = NULL WHERE id = $1", [req.auth!.user.id]);
+  await getAuthProvider().setEmail(u.auth_id, u.email).catch(() => {});
+  res.json({ user: await load(req.auth!.user.id) });
 });
 
 profileRouter.post("/profile/password", async (req, res) => {
@@ -131,6 +147,8 @@ profileRouter.post("/profile/password", async (req, res) => {
   if (next === req.body?.current_password) return void res.status(400).json({ error: "A nova senha deve ser diferente da atual." });
   const authId = await confirmPassword(req, res, req.body?.current_password);
   if (!authId) return;
+  const weak = await passwordProblem(next, req.auth!.user.email);
+  if (weak) return void res.status(400).json({ error: weak });
   try {
     await getAuthProvider().setPassword(authId, next);
   } catch (err) {
@@ -139,6 +157,7 @@ profileRouter.post("/profile/password", async (req, res) => {
   }
   // Troca de senha derruba as outras sessões (a atual continua).
   await db.query("DELETE FROM sessions WHERE user_id = $1 AND id <> $2", [req.auth!.user.id, currentSessionId(req) ?? ""]);
+  await securityAlert(req.auth!.user.id, req.auth!.organization.id, "Sua senha foi alterada", `A senha da sua conta foi alterada (${describeAgent(req.get("user-agent"))}, IP ${req.ip ?? "desconhecido"}).`);
   res.status(204).end();
 });
 
@@ -150,14 +169,6 @@ profileRouter.post("/profile/sessions/logout-others", async (req, res) => {
 // ------------------------------------------------------------------ Aparelhos (sessões)
 
 const refOf = (sessionId: string) => crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
-
-/** "Chrome no Windows": só para a pessoa reconhecer o aparelho. */
-export function describeAgent(ua: string | null): string {
-  if (!ua) return "Aparelho desconhecido";
-  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Navegador";
-  const os = /Windows/.test(ua) ? "Windows" : /Android/.test(ua) ? "Android" : /iPhone|iPad/.test(ua) ? "iOS" : /Mac OS X/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "outro sistema";
-  return `${browser} em ${os}`;
-}
 
 profileRouter.get("/profile/sessions", async (req, res) => {
   const current = currentSessionId(req);

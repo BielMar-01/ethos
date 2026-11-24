@@ -14,6 +14,7 @@ import MaskedInput from './MaskedInput'
 import { moneyFromCents } from './masks'
 import { Alert, Toast, Loading, ask } from './feedback'
 import Modal from './Modal'
+import LeaseExtras, { SignatureModal } from './LeaseExtras'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
 
@@ -303,6 +304,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
   const [preview, setPreview] = useState<{ content: string; title: string; saved?: boolean } | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [signing, setSigning] = useState<{ id: number; title: string } | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -380,6 +382,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
       </div>
       {error && <Alert className="no-print">{error}</Alert>}
       {notice && <Toast>{notice}</Toast>}
+      {signing && <SignatureModal docId={signing.id} title={signing.title} onClose={() => setSigning(null)} />}
 
       <div className="panel no-print">
         <dl className="facts">
@@ -429,6 +432,8 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
         </p>
       </div>
 
+      <LeaseExtras leaseId={id} status={lease.status} isAdmin={isAdmin} onChanged={load} />
+
       {preview && (
         <div className="panel print-area">
           <div className="paper-head no-print">
@@ -466,6 +471,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
                     <td>{d.generated_by_name ?? '—'}</td>
                     <td className="row-actions">
                       <button onClick={() => openDoc(d.id)}>Abrir</button>
+                      <button onClick={() => setSigning({ id: d.id, title: d.template_name })}>Assinaturas</button>
                     </td>
                   </tr>
                 ))}

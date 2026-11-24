@@ -24,8 +24,9 @@
 6. Domínio próprio: *Settings → Domains* (HTTPS é automático). Atualize `APP_URL` e as Redirect URLs.
 
 ## Limitações conhecidas em serverless
-- **Limite de tentativas (login, cadastro etc.) é por instância** (em memória): protege pouco contra ataque distribuído. Próximo passo: guardar os contadores no banco ou em Redis (Upstash).
-- O `setInterval` de lembretes não roda; quem faz o trabalho é o Cron.
+- O limite de tentativas das rotas de **segurança** (login, cadastro, senha, 2FA, convites) é **compartilhado entre instâncias** (guardado no banco). Os limites das rotas de baixo risco (CEP, leitura de documentos, chaves de API) ainda são por instância.
+- O `setInterval` de lembretes não roda; quem faz o trabalho é o Cron (**precisão**: no Hobby é 1×/dia; veja docs/CONFIGURACAO-PENDENTES.md, seção 8).
+- **Configuração de e-mail, WhatsApp, push, login social e demais serviços:** docs/CONFIGURACAO-PENDENTES.md.
 - Corpo de requisição na Vercel: máx. 4,5 MB (as fotos já são limitadas a 3 MB).
 - Fotos continuam no PostgreSQL; com volume, migrar para Supabase Storage (só `src/photos.ts` muda).
 - O service worker guarda só a casca do app; ao publicar mudanças grandes, altere `VERSION` em `client/public/sw.js`.

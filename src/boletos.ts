@@ -3,7 +3,12 @@ import { Router } from "express";
 import { db } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 import { isRealDate, parseId } from "./crud.js";
-import { CHARGE_SELECT, brToday, monthRange } from "./finance.js";
+import { CHARGE_SELECT, brToday, monthRange, recordPayment } from "./finance.js";
+import { notify, tenantUsersOfLease } from "./notifications.js";
+import { sendEmail } from "./mailer.js";
+import { SharedRateLimiter } from "./ratelimit.js";
+import { appUrl } from "./authProvider.js";
+import { formatBRL } from "./contractTemplate.js";
 import { ASAAS_URLS, orgAsaas, type AsaasConfig } from "./integrations.js";
 import { emitWebhook } from "./webhooks.js";
 
@@ -484,15 +489,78 @@ boletosRouter.post("/boletos/:id/paid", async (req, res) => {
     const paidAt = raw === undefined || raw === null || raw === "" ? brToday() : String(raw);
     if (!isRealDate(paidAt) || paidAt > brToday()) return void res.status(400).json({ error: "A data do pagamento deve ser uma data válida que não esteja no futuro." });
     await db.query("UPDATE boletos SET status = 'paga', paid_at = $1, updated_at = now() WHERE id = $2", [paidAt, b.id]);
+    // Opcional: já registra o pagamento (recibo + baixa) pelo valor do boleto, limitado ao saldo da cobrança.
+    let payment: { id: number; receipt_number: number } | null = null;
+    let paymentError: string | null = null;
+    if (req.body?.register_payment === true) {
+      const [row] = await db.query<{ lease_id: number; left: number; amount_cents: number }>(
+        `SELECT x.lease_id, (x.amount_cents - x.paid_cents) AS "left", b.amount_cents
+         FROM boletos b JOIN (${CHARGE_SELECT} WHERE c.organization_id = $1) x ON x.id = b.charge_id WHERE b.id = $2`,
+        [orgId, b.id],
+      );
+      const value = row ? Math.min(row.left, row.amount_cents) : 0;
+      if (!row || value < 1) paymentError = "A cobrança já está quitada: nenhum pagamento foi registrado.";
+      else {
+        const out = await recordPayment(orgId, req.auth!.user.id, {
+          leaseId: row.lease_id, receivedAt: paidAt, amountCents: value, method: "boleto", reference: `Boleto #${b.id}`,
+          allocations: [{ chargeId: b.charge_id, amount: value }],
+        });
+        if (out.code === 201) {
+          payment = out.payment;
+          await db.query("UPDATE boletos SET payment_id = $1 WHERE id = $2", [out.payment.id, b.id]);
+        } else paymentError = out.error;
+      }
+    }
     emitWebhook({
       organizationId: orgId, event: "boleto.paid", actor: { id: req.auth!.user.id, name: req.auth!.user.name, role: req.auth!.role },
       entity: "boletos", entityId: b.id, summary: "Boleto marcado como pago", data: { boleto_id: b.id, charge_id: b.charge_id, paid_at: paidAt },
     });
     const [item] = await db.query(`${BOLETO_SELECT} WHERE b.id = $1`, [b.id]);
-    res.json({ item });
+    res.json({ item, payment, payment_error: paymentError });
   } catch (err) {
     fail(res, err);
   }
+});
+
+const resendLimiter = new SharedRateLimiter("boleto-resend", 5, 60 * 60 * 1000);
+
+/** Texto da segunda via (e-mail, aviso e tela do inquilino). */
+export function boletoText(b: { description: string; amount_cents: number; due_date: string; identification_field: string | null; bank_slip_url: string | null; invoice_url: string | null; our_number: string | null; provider: string }) {
+  const due = String(b.due_date).slice(0, 10).split("-").reverse().join("/");
+  return [
+    `${b.description}`,
+    `Valor: ${formatBRL(b.amount_cents)} · Vencimento: ${due}`,
+    b.identification_field ? `Linha digitável: ${b.identification_field}` : null,
+    b.our_number ? `Nosso número: ${b.our_number}` : null,
+    b.bank_slip_url || b.invoice_url ? `Boleto: ${b.bank_slip_url ?? b.invoice_url}` : null,
+    !b.identification_field && !b.bank_slip_url && !b.invoice_url && b.provider === "manual" ? "Guia de cobrança da administradora (peça os dados de pagamento a ela)." : null,
+  ].filter(Boolean).join("\n");
+}
+
+/** Reenvia a segunda via do boleto em aberto ao(s) locatário(s): sino/e-mail/push dos que têm acesso e e-mail do cadastro dos demais. */
+boletosRouter.post("/boletos/:id/resend", async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  const id = parseId(req.params.id);
+  const [b] = id ? await db.query<any>(`${BOLETO_SELECT} WHERE b.id = $1 AND b.organization_id = $2`, [id, orgId]) : [];
+  if (!b) return void res.status(404).json({ error: "Não encontrado" });
+  if (!["pendente", "vencida"].includes(b.status)) return void res.status(409).json({ error: "Só boletos em aberto podem ser reenviados." });
+  if (!(await resendLimiter.allow(`b:${b.id}`))) return void res.status(429).json({ error: "Este boleto já foi reenviado várias vezes. Tente mais tarde." });
+  const [ch] = await db.query<{ lease_id: number }>("SELECT lease_id FROM charges WHERE id = $1", [b.charge_id]);
+  const users = await tenantUsersOfLease(ch!.lease_id);
+  const text = boletoText(b);
+  await notify(orgId, users, { category: "financeiro", kind: "boleto_resend", title: "Segunda via do boleto", body: text.slice(0, 480), linkKind: "charge", linkId: b.charge_id });
+  // Locatários SEM acesso ao app recebem direto no e-mail do cadastro.
+  const emails = await db.query<{ email: string }>(
+    `SELECT DISTINCT lower(t.email) AS email FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenant_id
+     WHERE lt.lease_id = $1 AND t.email IS NOT NULL AND t.email <> ''
+       AND lower(t.email) NOT IN (SELECT lower(u.email) FROM users u WHERE u.id = ANY($2::int[]))`,
+    [ch!.lease_id, users],
+  );
+  let direct = 0;
+  for (const e of emails) {
+    if (await sendEmail({ to: e.email, subject: "Segunda via do boleto", text: `${text}\n\nDúvidas? Fale com a sua administradora. ${appUrl()}` })) direct++;
+  }
+  res.json({ notified_users: users.length, direct_emails: direct });
 });
 
 /** Atualiza a situação de TODOS os boletos em aberto da organização (até 100 por vez, os menos recentes primeiro). */
@@ -577,4 +645,23 @@ boletosRouter.post("/boletos/:id/cancel", requireRole("admin"), async (req, res)
   } catch (err) {
     fail(res, err);
   }
+});
+
+/** Inquilino: boletos em aberto dos próprios contratos, com os dados para pagar ou imprimir a segunda via. */
+export const tenantBoletosRouter = Router();
+tenantBoletosRouter.get("/portal/tenant/boletos", requireAuth, async (req, res) => {
+  const a = req.auth!;
+  if (a.role !== "inquilino") return void res.status(403).json({ error: "Sem permissão" });
+  if (!a.tenantId) return void res.status(409).json({ error: "Seu acesso ainda não está vinculado a um cadastro de inquilino." });
+  const items = await db.query(
+    `${BOLETO_SELECT} WHERE b.organization_id = $1 AND b.status IN ('pendente','vencida')
+       AND c.lease_id IN (SELECT lease_id FROM lease_tenants WHERE tenant_id = $2) ORDER BY b.due_date`,
+    [a.organization.id, a.tenantId],
+  );
+  res.json({
+    items: (items as any[]).map((b) => ({
+      id: b.id, description: b.description, amount_cents: b.amount_cents, due_date: b.due_date, status: b.status, provider: b.provider,
+      identification_field: b.identification_field, our_number: b.our_number, url: b.bank_slip_url ?? b.invoice_url, text: boletoText(b),
+    })),
+  });
 });

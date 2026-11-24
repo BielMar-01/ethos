@@ -94,6 +94,9 @@ const FEATURES: { icon: IconName; title: string; text: string }[] = [
   { icon: 'wrench', title: 'Manutenção', text: 'Do chamado à conclusão: prioridade, responsável, orçamentos com aprovação, fotos e uma linha do tempo de tudo o que aconteceu.' },
   { icon: 'users', title: 'Área do cliente', text: 'O inquilino acompanha cobranças, recibos e contrato e abre chamados. O proprietário vê imóveis, repasses e vistorias.' },
   { icon: 'door', title: 'Moradores e acessos', text: 'Registre quem mora na unidade (cônjuge, filhos, parentes, funcionários) e autorize visitantes e prestadores. A portaria confere pelo nome ou código e registra entradas e saídas.' },
+  { icon: 'file', title: 'Aditivos, rescisão e assinaturas', text: 'Renovação e reajuste com minuta pronta (IGP-M/IPCA do Banco Central), rescisão com multa proporcional calculada, garantias e coleta de assinaturas eletrônicas simples por link.' },
+  { icon: 'wallet', title: 'Relatórios e conciliação', text: 'Inadimplência, DRE por imóvel e fluxo de caixa com exportação em CSV, conciliação do extrato bancário (OFX/CSV), multa e juros por atraso e rateio de despesas entre as unidades.' },
+  { icon: 'search', title: 'Captação e operação', text: 'Vitrine pública de unidades disponíveis, funil de interessados e agenda de visitas; prestadores com avaliação, manutenção preventiva recorrente, enquetes e ocorrências com multa.' },
   { icon: 'history', title: 'Registro de atividades', text: 'O administrador vê quem fez o quê, quando e de onde — logins, alterações, exclusões e acessos negados. O histórico não pode ser editado.' },
   { icon: 'code', title: 'API aberta', text: 'Documentação OpenAPI e chaves de API somente leitura para integrar a Ethos com os seus sistemas.' },
 ]
@@ -111,7 +114,8 @@ const SECURITY = [
   'Recibos, contratos emitidos e vistorias concluídas não podem ser editados; estornos preservam o histórico.',
   'Cada ação relevante fica registrada para o administrador, inclusive tentativas de acesso negadas.',
   'Chaves de API são somente leitura, guardadas apenas como hash e revogáveis a qualquer momento.',
-  'Acessos de convite expiram e funcionam uma única vez; tentativas de login são limitadas.',
+  'Acessos de convite expiram e funcionam uma única vez; tentativas de login são limitadas em todas as instâncias.',
+  'Verificação em duas etapas, passkeys, alerta de aparelho novo, e-mail trocado só depois de confirmado e exportação/encerramento da própria conta.',
 ]
 
 const FAQ = [

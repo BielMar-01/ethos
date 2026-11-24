@@ -270,6 +270,12 @@ maintenanceRouter.post("/maintenance/:id/status", async (req, res) => {
       return;
     }
   }
+  // Custo repassado ao proprietário: entra como desconto no repasse do mês da conclusão (ver finance.ts).
+  const chargeOwner = target === "concluida" && req.body?.charge_owner === true;
+  if (chargeOwner && !(cost && cost > 0)) {
+    res.status(400).json({ error: "Para cobrar do proprietário, informe o custo (cost_cents) maior que zero." });
+    return;
+  }
   const out = await transaction(async (tx) => {
     const [cur] = id
       ? await tx.query<{ status: MaintStatus }>("SELECT status FROM maintenance_requests WHERE id = $1 AND organization_id = $2 FOR UPDATE", [id, orgId])
@@ -285,9 +291,10 @@ maintenanceRouter.post("/maintenance/:id/status", async (req, res) => {
     await tx.query(
       `UPDATE maintenance_requests
        SET status = $1, cancelled_reason = $2, cost_cents = COALESCE($3, cost_cents),
-           completed_at = CASE WHEN $1 = 'concluida' THEN now() ELSE completed_at END
+           completed_at = CASE WHEN $1 = 'concluida' THEN now() ELSE completed_at END,
+           charge_owner = CASE WHEN $1 = 'concluida' THEN $5 ELSE charge_owner END
        WHERE id = $4`,
-      [target, reason ?? null, cost, id],
+      [target, reason ?? null, cost, id, chargeOwner],
     );
     const note = target === "cancelada" ? ` — ${reason}` : "";
     await addUpdate(tx, orgId, id!, authorOf(req), "status", `Status: ${STATUS_LABEL[target]}${note}`);

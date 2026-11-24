@@ -35,6 +35,8 @@ export interface AuthProvider {
    * clique. Exige a senha (o provedor abre uma sessão própria com ela). Lança "exists" se o e-mail já é de outra conta.
    */
   requestEmailChange(email: string, password: string, newEmail: string, redirectTo: string): Promise<void>;
+  /** Força o e-mail de login (admin do provedor). Usado para desfazer uma troca cancelada no app. */
+  setEmail(id: string, email: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------- Supabase
@@ -144,6 +146,11 @@ class SupabaseAuthProvider implements AuthProvider {
     if (status >= 400) throw new AuthProviderError("unavailable", `setPassword falhou (HTTP ${status})`);
   }
 
+  async setEmail(id: string, email: string) {
+    const { status } = await this.call(`/auth/v1/admin/users/${encodeURIComponent(id)}`, { method: "PUT", key: this.secretKey, body: { email, email_confirm: true } });
+    if (status >= 400) throw new AuthProviderError("unavailable", `setEmail falhou (HTTP ${status})`);
+  }
+
   async sendVerification(email: string, redirectTo: string) {
     const { status } = await this.call(`/auth/v1/resend?redirect_to=${encodeURIComponent(redirectTo)}`, {
       key: this.publishableKey,
@@ -244,6 +251,22 @@ export class MemoryAuthProvider implements AuthProvider {
     if (!u) throw new AuthProviderError("unavailable", "usuário inexistente");
     u.hash = hashPassword(password);
     for (const [t, uid] of this.tokens) if (uid === id) this.tokens.delete(t);
+  }
+
+  async setEmail(id: string, email: string) {
+    const u = this.users.get(id);
+    if (!u) throw new AuthProviderError("unavailable", "usuário inexistente");
+    u.email = email;
+    u.pending = undefined;
+  }
+
+  /** Teste: access_token válido do usuário (como o de um login social). */
+  tokenFor(email: string): string {
+    const u = [...this.users.values()].find((x) => x.email === email);
+    if (!u) throw new Error("usuário inexistente");
+    const token = "mem-" + crypto.randomBytes(16).toString("hex");
+    this.tokens.set(token, u.id);
+    return token;
   }
 
   async sendVerification(email: string, redirectTo: string) {

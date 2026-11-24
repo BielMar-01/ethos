@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { api, ROLE_LABELS, type Invitation, type Item, type Member, type Role } from './api'
+import { api, request, ROLE_LABELS, type Invitation, type Item, type Member, type Role } from './api'
 import { Alert, Toast, Loading, ask, toast } from './feedback'
 import Modal from './Modal'
 import PasswordInput from './PasswordInput'
@@ -84,6 +84,17 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
       await load()
     })
 
+  const [idle, setIdle] = useState<string>('')
+  useEffect(() => {
+    request<{ session_idle_minutes: number | null }>('/api/settings/security').then((r) => setIdle(r.session_idle_minutes ? String(r.session_idle_minutes) : '')).catch(() => {})
+  }, [])
+  const saveIdle = () =>
+    run(async () => {
+      const minutes = idle ? Number(idle) : null
+      await request('/api/settings/security', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session_idle_minutes: minutes }) })
+      setNotice(minutes ? `Sessões paradas por ${minutes} minutos serão encerradas.` : 'Sessões não expiram por inatividade (só em 7 dias).')
+    })
+
   const resetMfa = async (m: Member) => {
     if (!(await ask(`Desativar a verificação em duas etapas de ${m.name}? Ela entrará só com a senha e poderá configurar de novo. As outras sessões dela serão encerradas.`, { title: 'Redefinir 2FA', confirmLabel: 'Desativar 2FA', danger: true }))) return
     return run(async () => {
@@ -124,6 +135,18 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
 
       {error && <Alert>{error}</Alert>}
       {notice && <Toast>{notice}</Toast>}
+
+      <div className="panel stack" aria-labelledby="equipe-seguranca">
+        <h3 id="equipe-seguranca">Segurança da organização</h3>
+        <div className="form-grid">
+          <label>
+            Encerrar sessões paradas após (minutos)
+            <input type="number" min={15} max={1440} placeholder="Desligado" value={idle} onChange={(e) => setIdle(e.target.value)} />
+          </label>
+        </div>
+        <p className="muted small">De 15 a 1440 minutos. Vazio = a sessão só expira em 7 dias. Vale para todos os acessos desta organização.</p>
+        <div className="actions"><button onClick={saveIdle}>Salvar</button></div>
+      </div>
 
       {link && (
         <Modal title={link.label} size="sm" onClose={() => setLink(null)}>

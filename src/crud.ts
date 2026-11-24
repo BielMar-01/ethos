@@ -1,6 +1,7 @@
 import { Router, type Response } from "express";
 import { db, isForeignKeyViolation, isUniqueViolation } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
+import { PAGE_ERROR, pageInfo, pageParams } from "./paginate.js";
 
 export type Field = {
   name: string;
@@ -112,10 +113,22 @@ export function crudRouter({ table, fields, orderBy = "id" }: CrudOptions): Rout
   router.use(requireAuth, requireRole("admin", "colaborador"));
 
   router.get("/", async (req, res) => {
-    const items = await db.query(`SELECT * FROM ${table} WHERE organization_id = $1 ORDER BY ${orderBy}`, [
-      req.auth!.organization.id,
-    ]);
-    res.json({ items });
+    const orgId = req.auth!.organization.id;
+    const pg = pageParams(req.query);
+    const search = typeof req.query.q === "string" && req.query.q.trim() ? req.query.q.trim().slice(0, 100) : null;
+    if (pg === "invalid") return void res.status(400).json({ error: PAGE_ERROR });
+    // Busca (?q=) em todos os campos de texto cadastrados; só nomes definidos no código entram no SQL.
+    const textCols = fields.filter((f) => f.kind === "string").map((f) => f.name);
+    const params: unknown[] = [orgId];
+    let where = "organization_id = $1";
+    if (search && textCols.length > 0) {
+      params.push(`%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+      where += ` AND (${textCols.map((c) => `${c} ILIKE $2`).join(" OR ")})`;
+    }
+    if (!pg) return void res.json({ items: await db.query(`SELECT * FROM ${table} WHERE ${where} ORDER BY ${orderBy}`, params) });
+    const [count] = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${table} WHERE ${where}`, params);
+    const items = await db.query(`SELECT * FROM ${table} WHERE ${where} ORDER BY ${orderBy} LIMIT ${pg.perPage} OFFSET ${pg.offset}`, params);
+    res.json({ items, ...pageInfo(pg, count!.n) });
   });
 
   router.get("/:id", async (req, res) => {

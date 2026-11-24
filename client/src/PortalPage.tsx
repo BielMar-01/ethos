@@ -15,6 +15,8 @@ import {
 import { brl, date, dateTime } from './format'
 import { ClientAnnouncements, ClientInspections, OwnerMaintenance, TenantMaintenance } from './PortalWork'
 import { HouseholdTab } from './PortalHousehold'
+import { TenantParcels } from './AccessExtras'
+import { ClientPolls, OwnerIncome, OwnerSummary, TenantBoletos, TenantIncidents } from './PortalExtras'
 import { Alert, Loading } from './feedback'
 import Modal from './Modal'
 
@@ -62,9 +64,9 @@ export default function PortalPage({ role, initialTab }: { role: Role; initialTa
 
 // ------------------------------------------------------------------ Inquilino
 
-const TENANT_TABS = ['finance', 'contract', 'maintenance', 'inspections', 'household', 'visitors', 'announcements'] as const
+const TENANT_TABS = ['finance', 'contract', 'maintenance', 'inspections', 'household', 'visitors', 'parcels', 'incidents', 'polls', 'announcements'] as const
 type TenantTab = (typeof TENANT_TABS)[number]
-const OWNER_TABS = ['properties', 'transfers', 'maintenance', 'inspections', 'announcements'] as const
+const OWNER_TABS = ['properties', 'transfers', 'income', 'summary', 'maintenance', 'inspections', 'polls', 'announcements'] as const
 type OwnerTab = (typeof OWNER_TABS)[number]
 
 function TenantArea({ initialTab }: { initialTab?: string }) {
@@ -156,11 +158,20 @@ function TenantArea({ initialTab }: { initialTab?: string }) {
         <button role="tab" aria-selected={tab === 'inspections'} className={tab === 'inspections' ? 'tab active' : 'tab'} onClick={() => setTab('inspections')}>Vistorias</button>
         <button role="tab" aria-selected={tab === 'household'} className={tab === 'household' ? 'tab active' : 'tab'} onClick={() => setTab('household')}>Moradores</button>
         <button role="tab" aria-selected={tab === 'visitors'} className={tab === 'visitors' ? 'tab active' : 'tab'} onClick={() => setTab('visitors')}>Visitantes</button>
+        <button role="tab" aria-selected={tab === 'parcels'} className={tab === 'parcels' ? 'tab active' : 'tab'} onClick={() => setTab('parcels')}>Encomendas</button>
+        <button role="tab" aria-selected={tab === 'incidents'} className={tab === 'incidents' ? 'tab active' : 'tab'} onClick={() => setTab('incidents')}>Ocorrências</button>
+        <button role="tab" aria-selected={tab === 'polls'} className={tab === 'polls' ? 'tab active' : 'tab'} onClick={() => setTab('polls')}>Enquetes</button>
         <button role="tab" aria-selected={tab === 'announcements'} className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}>Comunicados</button>
       </div>
 
       <div className="no-print">
-        {tab === 'household' ? (
+        {tab === 'parcels' ? (
+          <TenantParcels />
+        ) : tab === 'incidents' ? (
+          <TenantIncidents />
+        ) : tab === 'polls' ? (
+          <ClientPolls />
+        ) : tab === 'household' ? (
           <HouseholdTab kind="residents" />
         ) : tab === 'visitors' ? (
           <HouseholdTab kind="visitors" />
@@ -172,6 +183,7 @@ function TenantArea({ initialTab }: { initialTab?: string }) {
           <ClientInspections who="tenant" />
         ) : tab === 'finance' ? (
           <>
+            <TenantBoletos />
             <h3>Cobranças</h3>
             {charges.length === 0 ? (
               <p className="empty">Nenhuma cobrança por enquanto.</p>
@@ -290,12 +302,21 @@ function OwnerArea({ initialTab }: { initialTab?: string }) {
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'properties'} className={tab === 'properties' ? 'tab active' : 'tab'} onClick={() => setTab('properties')}>Meus imóveis</button>
         <button role="tab" aria-selected={tab === 'transfers'} className={tab === 'transfers' ? 'tab active' : 'tab'} onClick={() => setTab('transfers')}>Repasses</button>
+        <button role="tab" aria-selected={tab === 'income'} className={tab === 'income' ? 'tab active' : 'tab'} onClick={() => setTab('income')}>Informe de rendimentos</button>
+        <button role="tab" aria-selected={tab === 'summary'} className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}>Resumo dos imóveis</button>
         <button role="tab" aria-selected={tab === 'maintenance'} className={tab === 'maintenance' ? 'tab active' : 'tab'} onClick={() => setTab('maintenance')}>Manutenção</button>
         <button role="tab" aria-selected={tab === 'inspections'} className={tab === 'inspections' ? 'tab active' : 'tab'} onClick={() => setTab('inspections')}>Vistorias</button>
+        <button role="tab" aria-selected={tab === 'polls'} className={tab === 'polls' ? 'tab active' : 'tab'} onClick={() => setTab('polls')}>Enquetes</button>
         <button role="tab" aria-selected={tab === 'announcements'} className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}>Comunicados</button>
       </div>
 
-      {tab === 'announcements' ? (
+      {tab === 'income' ? (
+        <OwnerIncome />
+      ) : tab === 'summary' ? (
+        <OwnerSummary />
+      ) : tab === 'polls' ? (
+        <ClientPolls />
+      ) : tab === 'announcements' ? (
         <ClientAnnouncements />
       ) : tab === 'maintenance' ? (
         <OwnerMaintenance />

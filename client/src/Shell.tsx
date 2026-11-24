@@ -16,6 +16,9 @@ import LeasesPage from './LeasesPage'
 import MaintenancePage from './MaintenancePage'
 import NotificationBell from './NotificationBell'
 import NotificationsPage from './NotificationsPage'
+import ReportsPage from './ReportsPage'
+import CapturePage from './CapturePage'
+import { IncidentsPage, PollsPage, PropertyDocsPage, ProvidersPage } from './OpsPages'
 import PortalPage from './PortalPage'
 import ProfilePage from './ProfilePage'
 import ResourcePage from './ResourcePage'
@@ -53,8 +56,19 @@ const STAFF_NAV: { label?: string; items: NavItem[] }[] = [
       { key: 'finance', label: 'Financeiro', icon: 'wallet' },
       { key: 'maintenance', label: 'Manutenção', icon: 'wrench' },
       { key: 'inspections', label: 'Vistorias', icon: 'camera' },
+      { key: 'providers', label: 'Prestadores e preventiva', icon: 'wrench' },
+      { key: 'incidents', label: 'Ocorrências', icon: 'shield' },
       { key: 'access', label: 'Moradores e acessos', icon: 'users' },
       { key: 'announcements', label: 'Comunicados', icon: 'megaphone' },
+      { key: 'polls', label: 'Enquetes', icon: 'check' },
+    ],
+  },
+  {
+    label: 'Negócios',
+    items: [
+      { key: 'capture', label: 'Captação', icon: 'search' },
+      { key: 'propdocs', label: 'Documentos dos imóveis', icon: 'file' },
+      { key: 'reports', label: 'Relatórios', icon: 'history' },
     ],
   },
   {
@@ -80,6 +94,13 @@ const CLIENT_NAV: { label?: string; items: NavItem[] }[] = [
 
 /** Para onde levar quem clicou numa notificação (equipe: página; cliente: aba da área do cliente). */
 const STAFF_TARGET: Record<string, string> = {
+  incident: 'incidents',
+  lead: 'capture',
+  poll: 'polls',
+  property: 'propdocs',
+  parcel: 'access',
+  visitor: 'access',
+  document: 'leases',
   maintenance: 'maintenance',
   inspection: 'inspections',
   charge: 'finance',
@@ -198,6 +219,12 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
   else if (current === 'maintenance') content = <MaintenancePage key={`m-${orgKey}`} isAdmin={isAdmin} currentUserId={session.user.id} />
   else if (current === 'inspections') content = <InspectionsPage key={`i-${orgKey}`} />
   else if (current === 'access') content = <AccessPage key={`ac-${orgKey}`} />
+  else if (current === 'reports') content = <ReportsPage key={`rp-${orgKey}`} />
+  else if (current === 'capture') content = <CapturePage key={`cp-${orgKey}`} isAdmin={isAdmin} />
+  else if (current === 'propdocs') content = <PropertyDocsPage key={`pd-${orgKey}`} isAdmin={isAdmin} />
+  else if (current === 'providers') content = <ProvidersPage key={`pv-${orgKey}`} />
+  else if (current === 'incidents') content = <IncidentsPage key={`ic-${orgKey}`} />
+  else if (current === 'polls') content = <PollsPage key={`po-${orgKey}`} isAdmin={isAdmin} />
   else if (current === 'announcements') content = <AnnouncementsPage key={`a-${orgKey}`} />
   else if (current === 'templates') content = <TemplatesPage key={`tp-${orgKey}`} canDelete={isAdmin} />
   else if (current === 'api') content = <ApiPage key={`api-${orgKey}`} isAdmin={isAdmin} />

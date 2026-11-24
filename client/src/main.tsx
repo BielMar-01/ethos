@@ -4,6 +4,7 @@ import './index.css'
 import App from './App.tsx'
 import { FeedbackHost } from './feedback'
 import { registerServiceWorker } from './pwa'
+import { installErrorReporting } from './errorReport'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -13,3 +14,4 @@ createRoot(document.getElementById('root')!).render(
 )
 
 registerServiceWorker()
+installErrorReporting()

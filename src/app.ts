@@ -7,7 +7,21 @@ import { AuthProviderError, appUrl, getAuthProvider } from "./authProvider.js";
 import { crudRouter, parseId, type Field } from "./crud.js";
 import { SharedRateLimiter } from "./ratelimit.js";
 import { csrfGuard } from "./csrf.js";
+import { channelsRouter } from "./channels.js";
 import { mfaRouter, startMfaChallenge, userHasMfa } from "./mfa.js";
+import { passkeysRouter } from "./passkeys.js";
+import "./jobs.js";
+import { lateFeesRouter } from "./lateFees.js";
+import { bankRouter } from "./bank.js";
+import { rateioRouter } from "./rateio.js";
+import { contracts2Router } from "./contracts2.js";
+import { signaturesRouter } from "./signatures.js";
+import { crmRouter } from "./crm.js";
+import { propDocsRouter } from "./propdocs.js";
+import { opsRouter } from "./ops.js";
+import { captureServerError, monitoringRouter } from "./monitoring.js";
+import { ownerReportsRouter, reportsRouter } from "./reports.js";
+import { COUNTRY_BLOCKED_MESSAGE, countryAllowed, noteLogin, passwordProblem, securityRouter } from "./security.js";
 import { teamRouter } from "./team.js";
 import { contractsRouter } from "./contracts.js";
 import { portalRouter } from "./portal.js";
@@ -21,9 +35,10 @@ import { dashboardRouter } from "./dashboard.js";
 import { apiKeysRouter } from "./apikeys.js";
 import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
-import { boletosRouter } from "./boletos.js";
+import { boletosRouter, tenantBoletosRouter } from "./boletos.js";
 import { profileRouter } from "./profile.js";
 import { householdRouter } from "./household.js";
+import { household2Router } from "./household2.js";
 import { importRouter } from "./importer.js";
 import { cepRouter } from "./cep.js";
 import { integrationsRouter } from "./integrations.js";
@@ -58,9 +73,15 @@ export function createApp() {
   });
   // A importação em massa tem o próprio limite de corpo (ver importer.ts); o resto da API aceita 100 KB.
   const smallJson = express.json({ limit: "100kb" });
-  app.use((req, res, next) => (req.path === "/api/import" ? next() : smallJson(req, res, next)));
+  app.use((req, res, next) => (req.path === "/api/import" || req.path === "/api/bank/import" ? next() : smallJson(req, res, next)));
   app.use("/api", csrfGuard);
   app.use(loadAuth);
+  // Leituras sensíveis que NÃO são oferecidas a chaves de API (dados pessoais/financeiros de terceiros, arquivos e evidências).
+  const KEY_BLOCKED = [/^\/api\/credit-checks/, /^\/api\/bank\//, /^\/api\/visitors\/\d+\/photo/, /^\/api\/property-documents\/\d+\/file/, /^\/api\/documents\/\d+\/signature/, /^\/api\/settings\/public-listing/, /^\/api\/reports\/(owner-income|dimob)/];
+  app.use("/api", (req, res, next) => {
+    if (req.auth?.viaApiKey && KEY_BLOCKED.some((r) => r.test(req.originalUrl.split("?")[0]!))) return void res.status(403).json({ error: "Este recurso não está disponível para chaves de API." });
+    next();
+  });
   app.use(auditMiddleware);
 
   // Limites contra força bruta e abuso de e-mails. Ficam no banco: valem entre instâncias (Vercel).
@@ -95,6 +116,11 @@ export function createApp() {
     }
     if (!(await registerLimiter.allow(`register:${req.ip}`))) {
       res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
+      return;
+    }
+    const weak = await passwordProblem(password, cleanEmail);
+    if (weak) {
+      res.status(400).json({ error: weak });
       return;
     }
     const orgName =
@@ -141,6 +167,7 @@ export function createApp() {
       return;
     }
     await createSession(res, created.userId, created.orgId, req);
+    await noteLogin(req, created.userId, created.orgId);
     res.status(201).json({
       user: { id: created.userId, name: name.trim(), email: cleanEmail },
       organization: { id: created.orgId, name: orgName },
@@ -182,11 +209,16 @@ export function createApp() {
         [verified.id],
       );
       if (user) {
+        const [pend] = await db.query<{ pending_email: string | null }>("SELECT pending_email FROM users WHERE id = $1", [user.id]);
         const taken = await db.query("SELECT 1 FROM users WHERE email = $1 AND id <> $2", [cleanEmail, user.id]);
-        if (taken.length === 0) {
+        if (pend?.pending_email === cleanEmail && taken.length === 0) {
           await db.query("UPDATE users SET email = $1, pending_email = NULL, pending_email_at = NULL WHERE id = $2", [cleanEmail, user.id]);
           user.email = cleanEmail;
-        } else user = undefined;
+        } else {
+          // A troca foi cancelada no app (ou o e-mail ficou ocupado): desfaz no provedor e recusa.
+          await getAuthProvider().setEmail(user.auth_id, user.email).catch(() => {});
+          user = undefined;
+        }
       }
     }
     if (!user || !verified || verified.id !== user.auth_id) {
@@ -217,12 +249,17 @@ export function createApp() {
       res.status(403).json({ error: "Usuário sem organização" });
       return;
     }
+    if (!(await countryAllowed(req, user.id))) {
+      res.status(403).json({ error: COUNTRY_BLOCKED_MESSAGE });
+      return;
+    }
     if (await userHasMfa(user.id)) {
       // Senha certa, mas há segundo fator: ainda não é sessão. O navegador devolve o código em /api/auth/mfa.
       res.json({ mfa_required: true, mfa_token: await startMfaChallenge(user.id, membership.id) });
       return;
     }
     await createSession(res, user.id, membership.id, req);
+    await noteLogin(req, user.id, membership.id);
     res.json({
       user: { id: user.id, name: user.name, email: user.email },
       organization: { id: membership.id, name: membership.name },
@@ -285,6 +322,11 @@ export function createApp() {
       res.status(400).json({ error: "Link inválido ou expirado. Solicite uma nova recuperação." });
       return;
     }
+    const weak = await passwordProblem(password, owner.email);
+    if (weak) {
+      res.status(400).json({ error: weak });
+      return;
+    }
     try {
       await provider.setPassword(owner.id, password);
     } catch (err) {
@@ -344,9 +386,12 @@ export function createApp() {
     const email = owner.email.toLowerCase();
     const [user] = await db.query<{ id: number; email: string }>("SELECT id, email FROM users WHERE auth_id = $1 AND deleted_at IS NULL", [owner.id]);
     if (user && user.email !== email) {
+      const [pend] = await db.query<{ pending_email: string | null }>("SELECT pending_email FROM users WHERE id = $1", [user.id]);
       const taken = await db.query("SELECT 1 FROM users WHERE email = $1 AND id <> $2", [email, user.id]);
-      if (taken.length > 0) {
-        res.status(409).json({ error: "Este e-mail já pertence a outra conta." });
+      if (pend?.pending_email !== email || taken.length > 0) {
+        // Troca cancelada no app (ou e-mail ocupado): o provedor volta ao e-mail do app.
+        await getAuthProvider().setEmail(owner.id, user.email).catch(() => {});
+        res.status(409).json({ error: "Este pedido de troca de e-mail foi cancelado ou não vale mais." });
         return;
       }
       await db.query("UPDATE users SET email = $1, pending_email = NULL, pending_email_at = NULL WHERE id = $2", [email, user.id]);
@@ -392,9 +437,25 @@ export function createApp() {
   // ---------- Financeiro ----------
   app.use("/api", financeRouter);
   app.use("/api", boletosRouter);
+  app.use("/api", lateFeesRouter);
+  app.use("/api", bankRouter);
+  app.use("/api", rateioRouter);
+  app.use("/api", contracts2Router);
+  app.use("/api", signaturesRouter);
+  app.use("/api", crmRouter);
+  app.use("/api", propDocsRouter);
+  app.use("/api", opsRouter);
+  app.use("/api", monitoringRouter);
+  app.use("/api", reportsRouter);
+  app.use("/api", ownerReportsRouter);
+  app.use("/api", tenantBoletosRouter);
   app.use("/api", mfaRouter);
+  app.use("/api", channelsRouter);
+  app.use("/api", passkeysRouter);
+  app.use("/api", securityRouter);
   app.use("/api", profileRouter);
   app.use("/api", householdRouter);
+  app.use("/api", household2Router);
 
   // ---------- Área do cliente, chaves de API e documentação ----------
   app.use("/api", maintenanceRouter);
@@ -534,7 +595,7 @@ export function createApp() {
     });
   }
 
-  const onError: ErrorRequestHandler = (err, _req, res, _next) => {
+  const onError: ErrorRequestHandler = (err, req, res, _next) => {
     if (err?.type === "entity.too.large") {
       res.status(413).json({ error: "Arquivo ou corpo grande demais (fotos: até 3 MB)" });
       return;
@@ -544,6 +605,7 @@ export function createApp() {
       return;
     }
     console.error(err);
+    void captureServerError(err, req);
     res.status(500).json({ error: "Erro interno" });
   };
   app.use(onError);

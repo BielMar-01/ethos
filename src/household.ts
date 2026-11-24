@@ -303,6 +303,9 @@ const newCode = () => Array.from(crypto.randomBytes(6), (b) => CODE_ALPHABET[b %
 
 const VISITOR_SELECT = (today: string) => `
   SELECT v.id, v.unit_id, v.lease_id, v.name, v.document, v.phone, v.category, v.vehicle_plate, v.valid_from, v.valid_until,
+         v.weekdays, to_char(v.time_from, 'HH24:MI') AS time_from, to_char(v.time_to, 'HH24:MI') AS time_to,
+         to_char(v.expected_time, 'HH24:MI') AS expected_time, v.max_stay_minutes, v.photo_consent_at,
+         EXISTS (SELECT 1 FROM visitor_photos vp WHERE vp.visitor_id = v.id) AS has_photo,
          v.access_code, v.status, v.notes, v.created_by_role, v.created_at,
          u.identifier AS unit_identifier, p.name AS property_name, cb.name AS created_by_name,
          CASE WHEN v.status <> 'autorizado' THEN v.status
@@ -323,7 +326,25 @@ interface VisitorValues {
   valid_from: string;
   valid_until: string;
   notes: string | null;
+  weekdays: string | null;
+  time_from: string | null;
+  time_to: string | null;
+  expected_time: string | null;
+  max_stay_minutes: number | null;
 }
+
+const hhmm = (v: unknown, label: string): string | null => {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) throw new HttpError(400, `${label} deve ser HH:MM.`);
+  return v;
+};
+const weekdaysOf = (v: unknown): string | null => {
+  if (v === undefined || v === null || v === "") return null;
+  const list = (Array.isArray(v) ? v : String(v).split(",")).map((x) => Number(x));
+  if (list.some((n) => !Number.isInteger(n) || n < 0 || n > 6)) throw new HttpError(400, "Dias da semana inválidos (0=domingo … 6=sábado).");
+  const uniq = [...new Set(list)].sort();
+  return uniq.length === 0 || uniq.length === 7 ? null : uniq.join(",");
+};
 
 function cleanVisitor(b: Record<string, unknown>, base?: VisitorValues): VisitorValues {
   const today = brToday();
@@ -334,6 +355,10 @@ function cleanVisitor(b: Record<string, unknown>, base?: VisitorValues): Visitor
   if (until < from) throw new HttpError(400, "O fim da autorização não pode ser antes do início.");
   if ((dayMs(until) - dayMs(from)) / 86_400_000 > MAX_WINDOW_DAYS) throw new HttpError(400, `A autorização pode durar no máximo ${MAX_WINDOW_DAYS} dias.`);
   if (until < today) throw new HttpError(400, "A autorização já estaria vencida.");
+  const tf = b.time_from === undefined && base ? base.time_from : hhmm(b.time_from, "Horário inicial");
+  const tt = b.time_to === undefined && base ? base.time_to : hhmm(b.time_to, "Horário final");
+  if ((tf === null) !== (tt === null)) throw new HttpError(400, "Informe o horário inicial e o final, ou nenhum dos dois.");
+  if (tf && tt && tf >= tt) throw new HttpError(400, "O horário final deve ser depois do inicial.");
   return {
     name: pick("name", (v) => text(v, 120, "o nome do visitante", true)!),
     document: pick("document", documentOf),
@@ -353,6 +378,15 @@ function cleanVisitor(b: Record<string, unknown>, base?: VisitorValues): Visitor
     valid_from: from,
     valid_until: until,
     notes: pick("notes", (v) => text(v, 500, "Observações")),
+    weekdays: pick("weekdays", weekdaysOf),
+    time_from: pick("time_from", (v) => hhmm(v, "Horário inicial")),
+    time_to: pick("time_to", (v) => hhmm(v, "Horário final")),
+    expected_time: pick("expected_time", (v) => hhmm(v, "Hora prevista")),
+    max_stay_minutes: pick("max_stay_minutes", (v) => {
+      if (v === undefined || v === null || v === "") return null;
+      if (!Number.isInteger(v) || (v as number) < 10 || (v as number) > 1440) throw new HttpError(400, "Permanência máxima: de 10 a 1440 minutos.");
+      return v as number;
+    }),
   };
 }
 
@@ -368,9 +402,10 @@ async function createVisitor(orgId: number, user: { id: number }, role: string, 
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
       const [row] = await db.query<{ id: number }>(
-        `INSERT INTO visitors (organization_id, unit_id, lease_id, name, document, phone, category, vehicle_plate, valid_from, valid_until, access_code, notes, created_by, created_by_role)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
-        [orgId, unitId, lease?.id ?? null, v.name, v.document, v.phone, v.category, v.vehicle_plate, v.valid_from, v.valid_until, newCode(), v.notes, user.id, role],
+        `INSERT INTO visitors (organization_id, unit_id, lease_id, name, document, phone, category, vehicle_plate, valid_from, valid_until, access_code, notes, created_by, created_by_role,
+                               weekdays, time_from, time_to, expected_time, max_stay_minutes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
+        [orgId, unitId, lease?.id ?? null, v.name, v.document, v.phone, v.category, v.vehicle_plate, v.valid_from, v.valid_until, newCode(), v.notes, user.id, role, v.weekdays, v.time_from, v.time_to, v.expected_time, v.max_stay_minutes],
       );
       return (await visitorById(orgId, row!.id))!;
     } catch (err) {
@@ -383,15 +418,18 @@ async function createVisitor(orgId: number, user: { id: number }, role: string, 
 /** Edição: só enquanto autorizado. `mine` restringe às unidades do inquilino. */
 async function updateVisitor(orgId: number, id: number, body: Record<string, unknown>, unitFilter?: number[]) {
   const [cur] = await db.query<VisitorValues & { status: string; unit_id: number }>(
-    "SELECT name, document, phone, category, vehicle_plate, valid_from, valid_until, notes, status, unit_id FROM visitors WHERE id = $1 AND organization_id = $2",
+    `SELECT name, document, phone, category, vehicle_plate, valid_from, valid_until, notes, status, unit_id, weekdays,
+            to_char(time_from, 'HH24:MI') AS time_from, to_char(time_to, 'HH24:MI') AS time_to, to_char(expected_time, 'HH24:MI') AS expected_time, max_stay_minutes
+     FROM visitors WHERE id = $1 AND organization_id = $2`,
     [id, orgId],
   );
   if (!cur || (unitFilter && !unitFilter.includes(cur.unit_id))) throw new HttpError(404, "Não encontrado");
   if (cur.status !== "autorizado") throw new HttpError(409, "Só é possível alterar uma autorização ativa.");
   const v = cleanVisitor(body, cur);
   await db.query(
-    "UPDATE visitors SET name=$1, document=$2, phone=$3, category=$4, vehicle_plate=$5, valid_from=$6, valid_until=$7, notes=$8, updated_at=now() WHERE id=$9",
-    [v.name, v.document, v.phone, v.category, v.vehicle_plate, v.valid_from, v.valid_until, v.notes, id],
+    `UPDATE visitors SET name=$1, document=$2, phone=$3, category=$4, vehicle_plate=$5, valid_from=$6, valid_until=$7, notes=$8,
+            weekdays=$10, time_from=$11, time_to=$12, expected_time=$13, max_stay_minutes=$14, not_arrived_alert_date=NULL, updated_at=now() WHERE id=$9`,
+    [v.name, v.document, v.phone, v.category, v.vehicle_plate, v.valid_from, v.valid_until, v.notes, id, v.weekdays, v.time_from, v.time_to, v.expected_time, v.max_stay_minutes],
   );
   return (await visitorById(orgId, id))!;
 }
@@ -479,6 +517,38 @@ householdRouter.post("/visitors/:id/cancel", async (req, res) => {
 });
 
 /** Portaria: bloqueia (ex.: pessoa não bem-vinda). Só a equipe desbloqueia. */
+/** Renova uma autorização ativa por mais dias (até 365 a partir de hoje). `valid_until` opcional; padrão: +30 dias. */
+async function renewVisitor(orgId: number, id: number, body: Record<string, unknown>, unitFilter?: number[]) {
+  const [cur] = await db.query<{ status: string; unit_id: number; valid_until: string }>("SELECT status, unit_id, valid_until FROM visitors WHERE id = $1 AND organization_id = $2", [id, orgId]);
+  if (!cur || (unitFilter && !unitFilter.includes(cur.unit_id))) throw new HttpError(404, "Não encontrado");
+  if (cur.status !== "autorizado") throw new HttpError(409, "Só é possível renovar uma autorização ativa.");
+  const today = brToday();
+  const base = cur.valid_until > today ? cur.valid_until : today;
+  const until = body.valid_until === undefined ? new Date(dayMs(base) + 30 * 86_400_000).toISOString().slice(0, 10) : dateOf(body.valid_until, "Novo fim")!;
+  if (until <= cur.valid_until) throw new HttpError(400, "O novo fim deve ser depois do atual.");
+  if ((dayMs(until) - dayMs(today)) / 86_400_000 > MAX_WINDOW_DAYS) throw new HttpError(400, `A autorização pode ir no máximo ${MAX_WINDOW_DAYS} dias à frente.`);
+  await db.query("UPDATE visitors SET valid_until = $1, not_arrived_alert_date = NULL, updated_at = now() WHERE id = $2", [until, id]);
+  return (await visitorById(orgId, id))!;
+}
+householdRouter.post("/visitors/:id/renew", async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return void res.status(404).json({ error: "Não encontrado" });
+    res.json({ item: await renewVisitor(req.auth!.organization.id, id, req.body ?? {}) });
+  } catch (e) {
+    send(res, e);
+  }
+});
+householdRouter.post("/portal/tenant/visitors/:id/renew", ...tenantGuard, async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return void res.status(404).json({ error: "Não encontrado" });
+    res.json({ item: await renewVisitor(req.auth!.organization.id, id, req.body ?? {}, await myUnits(req)) });
+  } catch (e) {
+    send(res, e);
+  }
+});
+
 householdRouter.post("/visitors/:id/block", async (req, res) => {
   try {
     const orgId = req.auth!.organization.id;
@@ -515,8 +585,8 @@ async function registerAccess(req: Request, res: Response, event: "entrada" | "s
     const today = brToday();
     const leaseId = await transaction(async (tx) => {
       const [v] = id
-        ? await tx.query<{ status: string; valid_from: string; valid_until: string; lease_id: number | null }>(
-            "SELECT status, valid_from, valid_until, lease_id FROM visitors WHERE id = $1 AND organization_id = $2 FOR UPDATE",
+        ? await tx.query<{ status: string; valid_from: string; valid_until: string; lease_id: number | null; weekdays: string | null; time_from: string | null; time_to: string | null }>(
+            "SELECT status, valid_from, valid_until, lease_id, weekdays, to_char(time_from,'HH24:MI') AS time_from, to_char(time_to,'HH24:MI') AS time_to FROM visitors WHERE id = $1 AND organization_id = $2 FOR UPDATE",
             [id, orgId],
           )
         : [];
@@ -528,6 +598,14 @@ async function registerAccess(req: Request, res: Response, event: "entrada" | "s
         if (v.status === "cancelado") throw new HttpError(409, "Autorização cancelada.");
         if (today < v.valid_from || today > v.valid_until) throw new HttpError(409, `Fora da validade: a autorização vale de ${v.valid_from.split("-").reverse().join("/")} a ${v.valid_until.split("-").reverse().join("/")}.`);
         if (inside) throw new HttpError(409, "Este visitante já está dentro. Registre a saída primeiro.");
+        if (v.weekdays && !v.weekdays.split(",").includes(String(new Date(`${today}T12:00:00Z`).getUTCDay()))) {
+          const names = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+          throw new HttpError(409, `Hoje não é um dia autorizado (vale: ${v.weekdays.split(",").map((d) => names[Number(d)]).join(", ")}).`);
+        }
+        if (v.time_from && v.time_to) {
+          const now = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+          if (now < v.time_from || now > v.time_to) throw new HttpError(409, `Fora do horário autorizado (${v.time_from} às ${v.time_to}). Agora são ${now}.`);
+        }
       } else if (!inside) {
         throw new HttpError(409, "Este visitante não está registrado como dentro.");
       }

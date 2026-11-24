@@ -773,3 +773,26 @@ button.user-card:hover, button.user-card.active { background: color-mix(in srgb,
 .recovery-codes code { font-size: 1rem; letter-spacing: 0.06em; }
 .device-list li { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
 .device-list li > div { min-width: 0; }
+
+/* Gráfico de barras simples (previsto x recebido) e medidor de enquete */
+.bars { display: flex; align-items: flex-end; gap: 0.6rem; height: 150px; padding: 0.5rem 0.25rem 1.4rem; border-bottom: 1px solid var(--border); position: relative; }
+.bar-col { flex: 1; display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 100%; position: relative; min-width: 0; }
+.bar-col small { position: absolute; bottom: -1.3rem; font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+.bar { width: 40%; max-width: 28px; border-radius: 4px 4px 0 0; min-height: 2px; }
+.bar.expected, .legend.expected { background: color-mix(in srgb, var(--info) 55%, transparent); }
+.bar.received, .legend.received { background: var(--ok); }
+.legend { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 3px; vertical-align: -1px; }
+.meter { height: 8px; background: color-mix(in srgb, var(--muted) 22%, transparent); border-radius: 4px; overflow: hidden; }
+.meter > span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.listing-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 0.6rem; margin: 0.75rem 0; }
+.listing-card { display: grid; gap: 0.2rem; text-align: left; padding: 0.7rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; font: inherit; color: inherit; }
+.listing-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+.visitor-photo { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); }
+.pref-table th, .pref-table td { text-align: center; }
+.pref-table th:first-child, .pref-table td:first-child { text-align: left; }
+.neg { color: var(--danger); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.file-pick input { max-width: 100%; }
+
+/* Contraste: a inicial do usuário sobre o fundo dourado translúcido usa o texto padrão (passa de 4,5:1 nos dois temas). */
+.avatar { color: var(--text); }

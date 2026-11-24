@@ -79,9 +79,16 @@ export function InstallButton() {
 /** Faixa fixa quando o aparelho perde a internet (e um aviso quando volta). */
 export function OfflineBanner() {
   const [online, setOnline] = useState(() => navigator.onLine)
+  const [saved, setSaved] = useState<number | null>(null)
+  useEffect(() => {
+    const onData = (e: Event) => setSaved((e as CustomEvent<number>).detail)
+    window.addEventListener('ethos:offline-data', onData)
+    return () => window.removeEventListener('ethos:offline-data', onData)
+  }, [])
   useEffect(() => {
     const up = () => {
       setOnline(true)
+      setSaved(null)
       toast.success('Conexão restabelecida.')
     }
     const down = () => setOnline(false)
@@ -96,6 +103,7 @@ export function OfflineBanner() {
   return (
     <div className="offline-banner" role="status">
       Sem conexão. Suas alterações não serão salvas até a internet voltar.
+      {saved !== null && ` Você está vendo os dados salvos neste aparelho às ${new Date(saved).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}.`}
     </div>
   )
 }

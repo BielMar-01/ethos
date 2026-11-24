@@ -131,7 +131,7 @@ test.describe("perfil: foto, e-mail com confirmação, aparelhos e privacidade",
     expect(other.ok()).toBeTruthy();
     await page.reload();
     await page.getByRole("complementary", { name: "Menu principal" }).getByRole("button", { name: /Meu perfil/ }).click();
-    const items = page.locator(".device-list li");
+    const items = page.locator(".panel").filter({ hasText: "Aparelhos conectados" }).locator(".device-list li");
     await expect(items).toHaveCount(3); // esta, a do convite aceito e a do segundo login
     await page.getByRole("button", { name: /Encerrar sessão de/ }).first().click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Encerrar", exact: true }).click();
@@ -171,5 +171,51 @@ test.describe("links de e-mail", () => {
     await page.getByRole("button", { name: "Ir para o login" }).click();
     await expect(page).toHaveURL(/#\/entrar/);
     await expect(page.getByRole("heading", { name: "Entrar", exact: true })).toBeVisible();
+  });
+});
+
+test.describe("passkeys e alertas", () => {
+  test("cadastra uma passkey (autenticador virtual) e entra sem senha", async ({ page, browser, request }) => {
+    const admin = await browser.newPage();
+    await openPanel(admin);
+    const email = await freshProfile(page, request, admin);
+
+    // Autenticador virtual do Chromium: faz o papel de biometria/chave de segurança.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("WebAuthn.enable");
+    await cdp.send("WebAuthn.addVirtualAuthenticator", {
+      options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+    });
+
+    await page.getByRole("button", { name: "Adicionar passkey" }).click();
+    const dlg = page.getByRole("dialog");
+    await dlg.getByLabel("Senha atual").fill(DEMO_PASSWORD);
+    await dlg.getByRole("button", { name: "Continuar" }).click();
+    await expect(page.getByText("Passkey cadastrada.")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Remover passkey/ })).toBeVisible();
+
+    await signOut(page);
+    await page.goto("/#/entrar");
+    await page.getByLabel("E-mail").fill(email);
+    await page.getByRole("button", { name: "Entrar com passkey" }).click();
+    await expect(page.locator(".topbar")).toBeVisible();
+
+    // O histórico de segurança mostra a entrada.
+    await page.getByRole("complementary", { name: "Menu principal" }).getByRole("button", { name: /Meu perfil/ }).click();
+    await expect(page.getByText("Entrou no sistema (passkey)").first()).toBeVisible();
+    await admin.close();
+  });
+
+  test("preferências por canal: e-mail disponível, WhatsApp e push desativados sem provedor", async ({ page }) => {
+    await openPanel(page);
+    await page.getByRole("button", { name: /^Notificações/ }).first().click();
+    await page.getByRole("button", { name: "Ver todas e preferências" }).click();
+    await expect(page.getByRole("switch", { name: "E-mail: Financeiro" })).toBeEnabled();
+    await expect(page.getByRole("switch", { name: "WhatsApp: Financeiro" })).toBeDisabled();
+    await expect(page.getByRole("switch", { name: "Push: Financeiro" })).toBeDisabled();
+    await page.getByRole("switch", { name: "E-mail: Financeiro" }).click();
+    await expect(page.getByRole("switch", { name: "E-mail: Financeiro" })).toHaveAttribute("aria-checked", "false");
+    await page.getByRole("switch", { name: "E-mail: Financeiro" }).click();
+    await expect(page.getByRole("switch", { name: "E-mail: Financeiro" })).toHaveAttribute("aria-checked", "true");
   });
 });

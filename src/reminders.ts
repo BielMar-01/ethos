@@ -103,6 +103,12 @@ export async function pruneNotifications(): Promise<void> {
   );
 }
 
+/**
+ * Tarefas periódicas de outros módulos (cobrança de multa, manutenção preventiva, vencimento de documentos…).
+ * Cada uma roda para TODAS as organizações no mesmo ritmo dos lembretes; falha de uma não derruba as outras.
+ */
+export const periodicJobs: { name: string; run: () => Promise<unknown> }[] = [];
+
 /** Roda para todas as organizações. Falha de uma não impede as demais. */
 export async function runAllReminders(): Promise<void> {
   const orgs = await db.query<{ id: number }>("SELECT id FROM organizations");
@@ -114,6 +120,13 @@ export async function runAllReminders(): Promise<void> {
     }
   }
   await pruneNotifications().catch((err) => console.error("Limpeza de notificações falhou:", err));
+  for (const job of periodicJobs) {
+    try {
+      await job.run();
+    } catch (err) {
+      console.error(`Tarefa periódica "${job.name}" falhou:`, err instanceof Error ? err.message : err);
+    }
+  }
 }
 
 /**

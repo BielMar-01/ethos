@@ -2,8 +2,11 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import { db, transaction, type Queryable } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 import { parseId } from "./crud.js";
+import { background } from "./background.js";
+import { deliverExternal, pushReady, whatsappReady } from "./channels.js";
+import { emailReady } from "./mailer.js";
 
-export const CATEGORIES = ["financeiro", "manutencao", "vistoria", "contrato", "comunicado", "acesso"] as const;
+export const CATEGORIES = ["financeiro", "manutencao", "vistoria", "contrato", "comunicado", "acesso", "seguranca", "encomenda", "ocorrencia"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 export const CATEGORY_LABEL: Record<Category, string> = {
@@ -13,6 +16,9 @@ export const CATEGORY_LABEL: Record<Category, string> = {
   contrato: "Contratos",
   comunicado: "Comunicados",
   acesso: "Portaria e visitantes",
+  seguranca: "Segurança da conta",
+  encomenda: "Encomendas",
+  ocorrencia: "Ocorrências",
 };
 
 export interface NotifyInput {
@@ -40,8 +46,12 @@ export async function notify(orgId: number, userIds: number[], n: NotifyInput, q
     );
     const off = new Set(muted.map((m) => m.user_id));
     let created = 0;
+    const toDeliver: number[] = [];
     for (const userId of ids) {
-      if (off.has(userId)) continue;
+      if (off.has(userId)) {
+        toDeliver.push(userId); // sino desligado: e-mail/WhatsApp/push ainda podem valer (preferência própria; dedupe em deliveries)
+        continue;
+      }
       const rows = await q.query(
         `INSERT INTO notifications (organization_id, user_id, category, kind, title, body, link_kind, link_id, dedupe_key)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -50,7 +60,9 @@ export async function notify(orgId: number, userIds: number[], n: NotifyInput, q
         [orgId, userId, n.category, n.kind, n.title.slice(0, 200), n.body?.slice(0, 500) ?? null, n.linkKind ?? null, n.linkId ?? null, n.dedupeKey ?? null],
       );
       created += rows.length;
+      if (rows.length > 0) toDeliver.push(userId);
     }
+    if (toDeliver.length > 0) background(deliverExternal(orgId, toDeliver, { category: n.category, title: n.title, body: n.body ?? null, dedupeKey: n.dedupeKey ?? null }));
     return created;
   } catch (err) {
     console.error("Falha ao criar notificação:", err instanceof Error ? err.message : err);
@@ -140,27 +152,39 @@ notificationsRouter.post("/notifications/read-all", async (req, res) => {
 
 // Rotas fixas acima de "/:id" para não serem capturadas por ele.
 notificationsRouter.get("/notifications/preferences", async (req, res) => {
-  const rows = await db.query<{ category: Category; in_app: boolean }>(
-    "SELECT category, in_app FROM notification_preferences WHERE organization_id = $1 AND user_id = $2",
+  const rows = await db.query<{ category: Category; in_app: boolean; email: boolean; whatsapp: boolean; push: boolean }>(
+    "SELECT category, in_app, email, whatsapp, push FROM notification_preferences WHERE organization_id = $1 AND user_id = $2",
     [req.auth!.organization.id, req.auth!.user.id],
   );
-  const set = new Map(rows.map((r) => [r.category, r.in_app]));
+  const set = new Map(rows.map((r) => [r.category, r]));
+  const [u] = await db.query<{ phone: string | null; whatsapp_opt_in_at: string | null }>("SELECT phone, whatsapp_opt_in_at FROM users WHERE id = $1", [req.auth!.user.id]);
   res.json({
-    items: CATEGORIES.map((category) => ({ category, label: CATEGORY_LABEL[category], in_app: set.get(category) ?? true })),
-    // Canais externos dependem de consentimento e de um provedor de envio: ainda não existem.
-    channels: { in_app: true, email: false, whatsapp: false, push: false },
+    items: CATEGORIES.map((category) => {
+      const r = set.get(category);
+      return { category, label: CATEGORY_LABEL[category], in_app: r?.in_app ?? true, email: r?.email ?? true, whatsapp: r?.whatsapp ?? true, push: r?.push ?? true };
+    }),
+    // O que o servidor consegue enviar (depende de provedor configurado) e se a pessoa consentiu com o WhatsApp.
+    channels: { in_app: true, email: emailReady(), whatsapp: whatsappReady(), push: pushReady() },
+    whatsapp_opt_in: !!u?.whatsapp_opt_in_at,
+    has_phone: !!u?.phone,
   });
 });
 
 notificationsRouter.put("/notifications/preferences", async (req, res) => {
-  const { category, in_app } = req.body ?? {};
-  if (!CATEGORIES.includes(category) || typeof in_app !== "boolean") {
-    return void res.status(400).json({ error: "Informe category válida e in_app (true/false)" });
+  const { category } = req.body ?? {};
+  const channels = ["in_app", "email", "whatsapp", "push"] as const;
+  const given = channels.filter((c) => req.body?.[c] !== undefined);
+  if (!CATEGORIES.includes(category) || given.length === 0 || given.some((c) => typeof req.body[c] !== "boolean")) {
+    return void res.status(400).json({ error: "Informe category válida e ao menos um canal (in_app, email, whatsapp, push) como true/false" });
   }
+  const v = (c: (typeof channels)[number]) => (req.body[c] === undefined ? null : req.body[c]);
   await db.query(
-    `INSERT INTO notification_preferences (user_id, organization_id, category, in_app) VALUES ($1, $2, $3, $4)
-     ON CONFLICT (user_id, organization_id, category) DO UPDATE SET in_app = EXCLUDED.in_app`,
-    [req.auth!.user.id, req.auth!.organization.id, category, in_app],
+    `INSERT INTO notification_preferences (user_id, organization_id, category, in_app, email, whatsapp, push)
+     VALUES ($1, $2, $3, COALESCE($4, true), COALESCE($5, true), COALESCE($6, true), COALESCE($7, true))
+     ON CONFLICT (user_id, organization_id, category) DO UPDATE SET
+       in_app = COALESCE($4, notification_preferences.in_app), email = COALESCE($5, notification_preferences.email),
+       whatsapp = COALESCE($6, notification_preferences.whatsapp), push = COALESCE($7, notification_preferences.push)`,
+    [req.auth!.user.id, req.auth!.organization.id, category, v("in_app"), v("email"), v("whatsapp"), v("push")],
   );
   res.status(204).end();
 });

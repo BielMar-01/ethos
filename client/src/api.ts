@@ -263,6 +263,8 @@ export const ROLE_LABELS: Record<Role, string> = {
   inquilino: 'Inquilino',
 }
 
+import { clearOfflineCache, readOffline, saveForOffline } from './offlineCache'
+
 export class ApiError extends Error {
   status: number
   constructor(message: string, status: number) {
@@ -283,12 +285,19 @@ const BY_STATUS: Record<number, string> = {
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
+  const isRead = !init?.method || init.method === 'GET'
   try {
     res = await fetch(path, {
       ...init,
       headers: { 'Content-Type': 'application/json', ...init?.headers },
     })
   } catch {
+    // Sem internet: a área do cliente mostra a última leitura guardada neste aparelho (e avisa a hora dela).
+    const cached = isRead ? readOffline<T>(path) : null
+    if (cached) {
+      window.dispatchEvent(new CustomEvent('ethos:offline-data', { detail: cached.at }))
+      return cached.data
+    }
     throw new ApiError('Sem conexão com o servidor. Verifique sua internet e tente novamente.', 0)
   }
   if (res.status === 204) return undefined as T
@@ -302,6 +311,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       res.status,
     )
   }
+  if (isRead) saveForOffline(path, data)
   return data as T
 }
 
@@ -321,9 +331,16 @@ export const api = {
       '/api/auth/register',
       json('POST', { name, email, password, organizationName }),
     ),
+  oauth: (accessToken: string) => request<Session | MfaChallenge>('/api/auth/oauth', json('POST', { accessToken })),
+  providers: () => request<{ providers: string[]; authorize_url: string | null; redirect_to: string }>('/api/auth/providers'),
+  passkeyOptions: (email: string) => request<{ options: unknown; token: string }>('/api/auth/passkey/options', json('POST', { email: email || undefined })),
+  passkeyVerify: (token: string, response: unknown) => request<Session | MfaChallenge>('/api/auth/passkey/verify', json('POST', { token, response })),
   resendVerification: (email: string) => request<void>('/api/auth/resend-verification', json('POST', { email })),
   emailConfirmed: (accessToken: string) => request<{ email: string }>('/api/auth/email-confirmed', json('POST', { accessToken })),
-  logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
+  logout: () => {
+    clearOfflineCache()
+    return request<void>('/api/auth/logout', { method: 'POST' })
+  },
   forgot: (email: string) => request<void>('/api/auth/forgot', json('POST', { email })),
   reset: (accessToken: string, password: string) =>
     request<void>('/api/auth/reset', json('POST', { accessToken, password })),

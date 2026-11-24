@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import QRCode from 'qrcode'
+import { startRegistration } from '@simplewebauthn/browser'
 import { api, request, ROLE_LABELS, type Role, type Session } from './api'
 import { Alert, Loading, ask, errorText, toast } from './feedback'
 import { date, dateTime } from './format'
@@ -64,7 +65,9 @@ export default function ProfilePage({ onSession, onLoggedOut }: { session: Sessi
         <EmailForm profile={profile} onSaved={load} />
         <PasswordForm />
         <TwoFactorCard />
+        <PasskeysCard />
         <SessionsCard profile={profile} />
+        <SecurityCard />
         <PrivacyCard onClosed={() => onLoggedOut?.()} />
       </div>
     </section>
@@ -206,6 +209,16 @@ function EmailForm({ profile, onSaved }: { profile: Profile; onSaved: () => Prom
   const [busy, setBusy] = useState(false)
   const pending = profile.user.pending_email
 
+  async function cancelPending() {
+    try {
+      await request('/api/profile/email', { method: 'DELETE' })
+      await onSaved()
+      toast.success('Troca de e-mail cancelada.')
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault()
     setBusy(true)
@@ -230,7 +243,8 @@ function EmailForm({ profile, onSaved }: { profile: Profile; onSaved: () => Prom
       {pending && (
         <p className="notice" role="status">
           Aguardando confirmação: enviamos um link para <strong>{pending}</strong>. Até você clicar, o login continua sendo <strong>{profile.user.email}</strong>.
-          Digitou errado? Peça a troca de novo com o e-mail correto.
+          Digitou errado? Peça a troca de novo com o e-mail correto, ou{' '}
+          <button type="button" className="link" onClick={cancelPending}>cancele este pedido</button>.
         </p>
       )}
       <div className="form-grid">
@@ -727,5 +741,213 @@ function CloseAccountModal({ onClose, onDone }: { onClose: () => void; onDone: (
         </div>
       </form>
     </Modal>
+  )
+}
+
+// ---------------------------------------------------------------- Passkeys
+
+interface Passkey {
+  id: string
+  name: string
+  created_at: string
+  last_used_at: string | null
+}
+
+function PasskeysCard() {
+  const [items, setItems] = useState<Passkey[] | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [removing, setRemoving] = useState<Passkey | null>(null)
+  const [error, setError] = useState('')
+  const supported = typeof window !== 'undefined' && 'PublicKeyCredential' in window
+
+  async function load() {
+    try {
+      setItems((await request<{ items: Passkey[] }>('/api/profile/passkeys')).items)
+    } catch (e) {
+      setError(errorText(e))
+    }
+  }
+  useEffect(() => {
+    void load()
+  }, [])
+
+  return (
+    <div className="panel stack" aria-labelledby="perfil-passkeys">
+      <h3 id="perfil-passkeys">Passkeys (entrar sem senha)</h3>
+      <p className="muted small">Entre com digital, rosto, PIN do aparelho ou chave de segurança. Uma passkey dispensa a senha e o código do 2FA no login.</p>
+      {error && <Alert>{error}</Alert>}
+      {!supported && <p className="notice" role="status">Este navegador não suporta passkeys.</p>}
+      {!items ? (
+        !error && <Loading label="Carregando…" />
+      ) : (
+        <ul className="plain-list device-list">
+          {items.length === 0 && <li className="muted">Nenhuma passkey cadastrada.</li>}
+          {items.map((p) => (
+            <li key={p.id}>
+              <div>
+                <strong>{p.name}</strong>
+                <div className="muted small">criada em {date(p.created_at)}{p.last_used_at ? ` · último uso ${dateTime(p.last_used_at)}` : ' · ainda não usada'}</div>
+              </div>
+              <button onClick={() => setRemoving(p)} aria-label={`Remover passkey ${p.name}`}>Remover</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="actions">
+        <button className="primary" disabled={!supported} onClick={() => setAdding(true)}>Adicionar passkey</button>
+      </div>
+      {adding && <AddPasskeyModal onClose={() => { setAdding(false); void load() }} />}
+      {removing && <RemovePasskeyModal passkey={removing} onClose={() => { setRemoving(null); void load() }} />}
+    </div>
+  )
+}
+
+function AddPasskeyModal({ onClose }: { onClose: () => void }) {
+  const [password, setPassword] = useState('')
+  const [name, setName] = useState('Este aparelho')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const o = await request<{ options: Parameters<typeof startRegistration>[0]['optionsJSON']; token: string }>('/api/profile/passkeys/options', json('POST', { password }))
+      const response = await startRegistration({ optionsJSON: o.options })
+      await request('/api/profile/passkeys/verify', json('POST', { token: o.token, response, name }))
+      toast.success('Passkey cadastrada.')
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error && err.name === 'NotAllowedError' ? 'Cadastro cancelado no aparelho.' : errorText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Adicionar passkey" size="sm" onClose={onClose} locked={busy}>
+      <form className="stack" onSubmit={submit}>
+        <label>
+          Nome (para reconhecer depois)
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} required />
+        </label>
+        <label>
+          Senha atual
+          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" aria-label="Senha atual" />
+        </label>
+        {error && <Alert>{error}</Alert>}
+        <div className="actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          <button type="submit" className="primary" disabled={busy || !password}>Continuar</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function RemovePasskeyModal({ passkey, onClose }: { passkey: Passkey; onClose: () => void }) {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    try {
+      await request(`/api/profile/passkeys/${encodeURIComponent(passkey.id)}`, json('DELETE', { password }))
+      toast.success('Passkey removida.')
+      onClose()
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+  return (
+    <Modal title={`Remover ${passkey.name}`} size="sm" onClose={onClose}>
+      <form className="stack" onSubmit={submit}>
+        <label>
+          Senha atual
+          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" aria-label="Senha atual" />
+        </label>
+        {error && <Alert>{error}</Alert>}
+        <div className="actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          <button type="submit" className="danger" disabled={!password}>Remover</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+// ---------------------------------------------------------------- Segurança: países e histórico
+
+interface LogItem {
+  id: string
+  created_at: string
+  summary: string
+  ok: boolean
+  ip: string | null
+  device: string
+}
+
+function SecurityCard() {
+  const [countries, setCountries] = useState('')
+  const [current, setCurrent] = useState<string | null>(null)
+  const [log, setLog] = useState<LogItem[] | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const s = await request<{ allowed_countries: string; current_country: string | null }>('/api/profile/security')
+        setCountries(s.allowed_countries)
+        setCurrent(s.current_country)
+        setLog((await request<{ items: LogItem[] }>('/api/profile/security-log')).items)
+      } catch (e) {
+        setError(errorText(e))
+      }
+    })()
+  }, [])
+
+  async function save(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const r = await request<{ allowed_countries: string }>('/api/profile/security', json('PUT', { allowed_countries: countries }))
+      setCountries(r.allowed_countries)
+      toast.success(r.allowed_countries ? 'Países permitidos salvos.' : 'Sem restrição de país.')
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="panel stack" aria-labelledby="perfil-seguranca">
+      <h3 id="perfil-seguranca">Alertas e histórico de segurança</h3>
+      <p className="muted small">Você recebe um aviso (sino e e-mail) quando entram na conta de um aparelho novo e quando a senha ou o e-mail mudam.</p>
+      <form className="stack" onSubmit={save}>
+        <label>
+          Aceitar login só destes países (opcional)
+          <input value={countries} onChange={(e) => setCountries(e.target.value)} placeholder="BR, PT" maxLength={60} />
+        </label>
+        <span className="muted small">Códigos de 2 letras separados por vírgula. Vazio = qualquer país.{current ? ` Você está acessando de ${current}.` : ' O país só é detectado quando o servidor está atrás de um proxy que informa o país (como a Vercel).'}</span>
+        {error && <Alert>{error}</Alert>}
+        <div className="actions"><button type="submit" disabled={busy}>Salvar países</button></div>
+      </form>
+      <h4>Últimas atividades de segurança</h4>
+      {!log ? <Loading label="Carregando…" /> : log.length === 0 ? <p className="muted small">Nada registrado ainda.</p> : (
+        <ul className="plain-list device-list">
+          {log.slice(0, 15).map((l) => (
+            <li key={l.id}>
+              <div>
+                <strong>{l.summary}</strong> {!l.ok && <span className="badge badge-v-bloqueado">falhou</span>}
+                <div className="muted small">{dateTime(l.created_at)} · {l.device}{l.ip ? ` · IP ${l.ip}` : ''}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

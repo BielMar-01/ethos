@@ -1,4 +1,7 @@
-export type PublicRoute = 'home' | 'login' | 'register' | 'api'
+export type PublicRoute = 'home' | 'login' | 'register' | 'api' | 'listing'
+
+/** Token da vitrine pública (#/imoveis/<token>), se a URL for essa. */
+export const listingToken = (hash: string): string | null => /^#\/imoveis\/([\w-]{10,80})$/.exec(hash)?.[1] ?? null
 
 /** Rodando como app instalado (PWA): não existe "página inicial de divulgação", o app abre direto no login. */
 export function isStandalone(): boolean {
@@ -9,6 +12,7 @@ export function isStandalone(): boolean {
 
 /** Navegação por hash (#/entrar), sem biblioteca de rotas. O hash de recuperação de senha não começa com "/". */
 export function routeFromHash(hash: string): PublicRoute {
+  if (listingToken(hash)) return 'listing'
   switch (hash.replace(/^#\/?/, '')) {
     case 'entrar':
       return 'login'
@@ -21,7 +25,7 @@ export function routeFromHash(hash: string): PublicRoute {
   }
 }
 
-const PATHS: Record<PublicRoute, string> = { home: '/', login: '/entrar', register: '/cadastro', api: '/api' }
+const PATHS: Record<PublicRoute, string> = { home: '/', login: '/entrar', register: '/cadastro', api: '/api', listing: '/imoveis' }
 
 export const go = (route: PublicRoute) => {
   window.location.hash = PATHS[route]

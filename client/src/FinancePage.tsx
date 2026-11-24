@@ -13,6 +13,7 @@ import MaskedInput from './MaskedInput'
 import { moneyFromCents } from './masks'
 import { Alert, Toast, Loading, ask } from './feedback'
 import Modal from './Modal'
+import { BankTab, RateioTab, SettingsTab } from './FinanceExtras'
 import BoletosTab, { BoletoDetail, BulkBoletoModal, IssueBoletoModal, chargeAcceptsBoleto, useBoletos, type Boleto } from './BoletosTab'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inesperado')
@@ -42,7 +43,7 @@ const KINDS = [
   ['aluguel', 'Aluguel (avulso)'],
 ] as const
 
-type Tab = 'charges' | 'boletos' | 'payments' | 'transfers'
+type Tab = 'charges' | 'boletos' | 'payments' | 'transfers' | 'bank' | 'rateio' | 'settings'
 
 export default function FinancePage({ isAdmin }: { isAdmin: boolean }) {
   const [tab, setTab] = useState<Tab>('charges')
@@ -131,7 +132,7 @@ export default function FinancePage({ isAdmin }: { isAdmin: boolean }) {
       )}
 
       <div className="tabs no-print" role="tablist">
-        {([['charges', 'Cobranças'], ['boletos', 'Boletos'], ['payments', 'Pagamentos'], ['transfers', 'Repasses']] as const).map(([k, label]) => (
+        {([['charges', 'Cobranças'], ['boletos', 'Boletos'], ['payments', 'Pagamentos'], ['transfers', 'Repasses'], ['bank', 'Conciliação'], ['rateio', 'Rateio'], ['settings', 'Configurações']] as const).map(([k, label]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'tab active' : 'tab'} onClick={() => setTab(k)}>
             {label}
           </button>
@@ -142,6 +143,9 @@ export default function FinancePage({ isAdmin }: { isAdmin: boolean }) {
         {tab === 'charges' && <ChargesTab month={month} version={version} isAdmin={isAdmin} onChange={reload} onError={fail} onOk={ok} onReceipt={openReceipt} />}
         {tab === 'boletos' && <BoletosTab month={month} version={version} isAdmin={isAdmin} onChange={reload} onError={fail} />}
         {tab === 'payments' && <PaymentsTab month={month} version={version} isAdmin={isAdmin} onChange={reload} onError={fail} onOk={ok} onReceipt={openReceipt} />}
+        {tab === 'bank' && <BankTab onChange={reload} />}
+        {tab === 'rateio' && <RateioTab isAdmin={isAdmin} onChange={reload} />}
+        {tab === 'settings' && <SettingsTab isAdmin={isAdmin} />}
         {tab === 'transfers' && <TransfersTab month={month} version={version} isAdmin={isAdmin} onChange={reload} onError={fail} onOk={ok} />}
       </div>
     </section>

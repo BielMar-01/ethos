@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from "./auth.js";
 import { isRealDate, parseId } from "./crud.js";
 import { formatBRL, formatDate, joinNames } from "./contractTemplate.js";
 import { notify, tenantUsersOfLease } from "./notifications.js";
+import { PAGE_ERROR, pageInfo, pageParams } from "./paginate.js";
 
 export const financeRouter = Router();
 financeRouter.use(
@@ -103,11 +104,12 @@ financeRouter.get("/charges", async (req, res) => {
     params.push(req.query.status);
     outer = ` WHERE x.status = $${params.length}`;
   }
-  const items = await db.query(
-    `SELECT x.* FROM (${CHARGE_SELECT} WHERE ${where}) x${outer} ORDER BY x.due_date, x.id`,
-    params,
-  );
-  res.json({ items });
+  const pg = pageParams(req.query);
+  if (pg === "invalid") return void res.status(400).json({ error: PAGE_ERROR });
+  const base = `SELECT x.* FROM (${CHARGE_SELECT} WHERE ${where}) x${outer} ORDER BY x.due_date, x.id`;
+  if (!pg) return void res.json({ items: await db.query(base, params) });
+  const [count] = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM (SELECT x.id FROM (${CHARGE_SELECT} WHERE ${where}) x${outer}) y`, params);
+  res.json({ items: await db.query(`${base} LIMIT ${pg.perPage} OFFSET ${pg.offset}`, params), ...pageInfo(pg, count!.n) });
 });
 
 /** Gera o aluguel do mês para todos os contratos vigentes no período (idempotente). */
@@ -118,23 +120,36 @@ financeRouter.post("/charges/generate", async (req, res) => {
     res.status(400).json({ error: "month deve ser AAAA-MM" });
     return;
   }
-  const leases = await db.query<{ id: number; rent_cents: number; due_day: number }>(
-    `SELECT id, rent_cents, due_day FROM leases
+  const leases = await db.query<{ id: number; rent_cents: number; due_day: number; start_date: string; end_date: string }>(
+    `SELECT id, rent_cents, due_day, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date FROM leases
      WHERE organization_id = $1 AND status = 'vigente' AND start_date < $3 AND end_date >= $2`,
     [orgId, range.start, range.next],
   );
+  const [cfg] = await db.query<{ prorata_enabled: boolean }>("SELECT prorata_enabled FROM organizations WHERE id = $1", [orgId]);
   const label = `${range.start.slice(5, 7)}/${range.start.slice(0, 4)}`;
   let created = 0;
   await transaction(async (tx) => {
     for (const l of leases) {
       const day = Math.min(l.due_day, range.days);
       const due = `${range.start.slice(0, 8)}${String(day).padStart(2, "0")}`;
+      // Pro rata (opcional): primeiro mês (contrato começa depois do dia 1) e último (termina antes do fim do mês).
+      let amount = l.rent_cents;
+      let description = `Aluguel ${label}`;
+      if (cfg?.prorata_enabled) {
+        const first = l.start_date > range.start ? Number(l.start_date.slice(8, 10)) : 1;
+        const lastDay = l.end_date < range.next && l.end_date >= range.start ? Number(l.end_date.slice(8, 10)) : range.days;
+        const used = Math.min(lastDay, range.days) - first + 1;
+        if (used > 0 && used < range.days) {
+          amount = Math.max(1, Math.round((l.rent_cents * used) / range.days));
+          description = `Aluguel ${label} (proporcional: ${used}/${range.days} dias)`;
+        }
+      }
       const r = await tx.query(
         `INSERT INTO charges (organization_id, lease_id, kind, description, competence, due_date, amount_cents, created_by)
          VALUES ($1, $2, 'aluguel', $3, $4, $5, $6, $7)
          ON CONFLICT (lease_id, competence) WHERE kind = 'aluguel' AND cancelled_at IS NULL DO NOTHING
          RETURNING id`,
-        [orgId, l.id, `Aluguel ${label}`, range.start, due, l.rent_cents, req.auth!.user.id],
+        [orgId, l.id, description, range.start, due, amount, req.auth!.user.id],
       );
       created += r.length;
     }
@@ -265,7 +280,9 @@ financeRouter.get("/payments", async (req, res) => {
     params.push(r.start, r.next);
     where += " AND p.received_at >= $2 AND p.received_at < $3";
   }
-  const items = await db.query(
+  const pg = pageParams(req.query);
+  if (pg === "invalid") return void res.status(400).json({ error: PAGE_ERROR });
+  const paymentRows = (limit: string) => db.query(
     `SELECT p.id, p.lease_id, p.received_at, p.amount_cents, p.method, p.reference, p.receipt_number,
             p.voided_at, p.void_reason, p.created_at,
             u.identifier AS unit_identifier, pr.name AS property_name,
@@ -275,10 +292,12 @@ financeRouter.get("/payments", async (req, res) => {
      JOIN leases l ON l.id = p.lease_id
      JOIN units u ON u.id = l.unit_id
      JOIN properties pr ON pr.id = u.property_id
-     WHERE ${where} ORDER BY p.received_at DESC, p.id DESC`,
+     WHERE ${where} ORDER BY p.received_at DESC, p.id DESC${limit}`,
     params,
   );
-  res.json({ items });
+  if (!pg) return void res.json({ items: await paymentRows("") });
+  const [count] = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM payments p WHERE ${where}`, params);
+  res.json({ items: await paymentRows(` LIMIT ${pg.perPage} OFFSET ${pg.offset}`), ...pageInfo(pg, count!.n) });
 });
 
 financeRouter.get("/payments/:id", async (req, res) => {
@@ -308,53 +327,23 @@ financeRouter.get("/payments/:id", async (req, res) => {
  * Registra um pagamento e dá baixa nas cobranças indicadas (tudo em uma transação).
  * O total das baixas deve ser igual ao valor recebido: não há saldo "solto".
  */
-financeRouter.post("/payments", async (req, res) => {
-  const orgId = req.auth!.organization.id;
-  const { received_at, amount_cents, method, reference, allocations } = req.body ?? {};
-  const leaseId = parseId(req.body?.lease_id);
-  if (!leaseId) {
-    res.status(400).json({ error: "lease_id inválido" });
-    return;
-  }
-  if (typeof received_at !== "string" || !isRealDate(received_at) || received_at > brToday()) {
-    res.status(400).json({ error: "received_at inválida (AAAA-MM-DD, não pode ser futura)" });
-    return;
-  }
-  if (!Number.isInteger(amount_cents) || amount_cents < 1 || amount_cents > INT4_MAX) {
-    res.status(400).json({ error: "amount_cents deve ser um inteiro positivo (centavos)" });
-    return;
-  }
-  if (!METHODS.includes(method)) {
-    res.status(400).json({ error: "method inválido" });
-    return;
-  }
-  if (reference !== undefined && reference !== null && (typeof reference !== "string" || reference.length > 200)) {
-    res.status(400).json({ error: "reference inválida" });
-    return;
-  }
-  if (!Array.isArray(allocations) || allocations.length === 0 || allocations.length > 100) {
-    res.status(400).json({ error: "Informe as cobranças a baixar (allocations)" });
-    return;
-  }
-  const parsed: { chargeId: number; amount: number }[] = [];
-  for (const a of allocations) {
-    const chargeId = parseId(a?.charge_id);
-    if (!chargeId || !Number.isInteger(a?.amount_cents) || a.amount_cents < 1) {
-      res.status(400).json({ error: "Baixa inválida: informe charge_id e amount_cents positivo" });
-      return;
-    }
-    if (parsed.some((p) => p.chargeId === chargeId)) {
-      res.status(400).json({ error: "Cobrança repetida nas baixas" });
-      return;
-    }
-    parsed.push({ chargeId, amount: a.amount_cents });
-  }
-  if (parsed.reduce((s, a) => s + a.amount, 0) !== amount_cents) {
-    res.status(400).json({ error: "A soma das baixas deve ser igual ao valor do pagamento" });
-    return;
-  }
+export interface PaymentInput {
+  leaseId: number;
+  receivedAt: string;
+  amountCents: number;
+  method: (typeof METHODS)[number];
+  reference: string | null;
+  allocations: { chargeId: number; amount: number }[];
+}
+export type PaymentOutcome = { code: 201; payment: { id: number; receipt_number: number } } | { code: 400 | 409; error: string };
 
-  const outcome = await transaction(async (tx) => {
+/**
+ * Registra um pagamento com baixas e recibo numerado, numa transação (usada pela tela de Pagamentos, pelo boleto marcado
+ * como pago e pela conciliação bancária). As validações de valor e de data ficam em quem chama.
+ */
+export async function recordPayment(orgId: number, userId: number | null, p: PaymentInput): Promise<PaymentOutcome> {
+  const { leaseId, receivedAt, amountCents, method, reference, allocations: parsed } = p;
+  return transaction(async (tx) => {
     const [lease] = await tx.query<{ unit_id: number }>("SELECT unit_id FROM leases WHERE id = $1 AND organization_id = $2", [
       leaseId,
       orgId,
@@ -406,8 +395,8 @@ financeRouter.post("/payments", async (req, res) => {
       number: next!.n,
       orgName: org!.name,
       payers: payers.map((p) => p.name),
-      amountCents: amount_cents,
-      receivedAt: received_at,
+      amountCents: amountCents,
+      receivedAt: receivedAt,
       method,
       reference: reference ?? null,
       property: ctx!.property,
@@ -418,7 +407,7 @@ financeRouter.post("/payments", async (req, res) => {
       `INSERT INTO payments (organization_id, lease_id, received_at, amount_cents, method, reference,
                              receipt_number, receipt_content, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, receipt_number`,
-      [orgId, leaseId, received_at, amount_cents, method, reference ?? null, next!.n, receipt, req.auth!.user.id],
+      [orgId, leaseId, receivedAt, amountCents, method, reference ?? null, next!.n, receipt, userId],
     );
     for (const a of parsed) {
       await tx.query("INSERT INTO payment_allocations (payment_id, charge_id, amount_cents) VALUES ($1, $2, $3)", [
@@ -428,12 +417,68 @@ financeRouter.post("/payments", async (req, res) => {
       ]);
     }
     return { code: 201, payment: payment! };
+  }) as Promise<PaymentOutcome>;
+}
+
+financeRouter.post("/payments", async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  const { received_at, amount_cents, method, reference, allocations } = req.body ?? {};
+  const leaseId = parseId(req.body?.lease_id);
+  if (!leaseId) {
+    res.status(400).json({ error: "lease_id inválido" });
+    return;
+  }
+  if (typeof received_at !== "string" || !isRealDate(received_at) || received_at > brToday()) {
+    res.status(400).json({ error: "received_at inválida (AAAA-MM-DD, não pode ser futura)" });
+    return;
+  }
+  if (!Number.isInteger(amount_cents) || amount_cents < 1 || amount_cents > INT4_MAX) {
+    res.status(400).json({ error: "amount_cents deve ser um inteiro positivo (centavos)" });
+    return;
+  }
+  if (!METHODS.includes(method)) {
+    res.status(400).json({ error: "method inválido" });
+    return;
+  }
+  if (reference !== undefined && reference !== null && (typeof reference !== "string" || reference.length > 200)) {
+    res.status(400).json({ error: "reference inválida" });
+    return;
+  }
+  if (!Array.isArray(allocations) || allocations.length === 0 || allocations.length > 100) {
+    res.status(400).json({ error: "Informe as cobranças a baixar (allocations)" });
+    return;
+  }
+  const parsed: { chargeId: number; amount: number }[] = [];
+  for (const a of allocations) {
+    const chargeId = parseId(a?.charge_id);
+    if (!chargeId || !Number.isInteger(a?.amount_cents) || a.amount_cents < 1) {
+      res.status(400).json({ error: "Baixa inválida: informe charge_id e amount_cents positivo" });
+      return;
+    }
+    if (parsed.some((p) => p.chargeId === chargeId)) {
+      res.status(400).json({ error: "Cobrança repetida nas baixas" });
+      return;
+    }
+    parsed.push({ chargeId, amount: a.amount_cents });
+  }
+  if (parsed.reduce((s, a) => s + a.amount, 0) !== amount_cents) {
+    res.status(400).json({ error: "A soma das baixas deve ser igual ao valor do pagamento" });
+    return;
+  }
+
+  const outcome = await recordPayment(orgId, req.auth!.user.id, {
+    leaseId: leaseId!,
+    receivedAt: received_at,
+    amountCents: amount_cents,
+    method,
+    reference: reference ?? null,
+    allocations: parsed,
   });
   if (outcome.code !== 201) {
     res.status(outcome.code).json({ error: outcome.error });
     return;
   }
-  const created = outcome.payment!;
+  const created = outcome.payment;
   await notify(orgId, await tenantUsersOfLease(leaseId!), {
     category: "financeiro",
     kind: "payment_received",
@@ -492,7 +537,7 @@ financeRouter.get("/transfers", async (req, res) => {
   }
   const items = await db.query(
     `SELECT t.id, t.owner_id, o.name AS owner_name, t.period, t.gross_cents, t.fee_cents, t.net_cents,
-            t.fee_bps, t.status, t.paid_at, t.generated_at
+            t.fee_bps, t.maintenance_cents, t.status, t.paid_at, t.generated_at
      FROM owner_transfers t JOIN owners o ON o.id = t.owner_id
      WHERE ${where} ORDER BY t.period DESC, o.name`,
     params,
@@ -560,20 +605,75 @@ financeRouter.post("/transfers/generate", async (req, res) => {
       [orgId, range.start],
     );
     const paidOwners = new Set(existing.filter((e) => e.status === "pago").map((e) => e.owner_id));
+
+    // Custos de manutenção cobrados do proprietário: entram como desconto no repasse deste mês, em partes iguais,
+    // desde que caibam no líquido de TODOS os donos do imóvel (o que não couber fica para o mês seguinte).
+    const feeOf = (g: number) => Math.round((g * feeBps) / 10000);
+    const paidProps = [...ownersOf].filter(([, owners]) => owners.some((o) => paidOwners.has(o))).map(([p]) => p);
+    await tx.query(
+      `UPDATE maintenance_requests SET owner_deduct_period = NULL
+       WHERE organization_id = $1 AND owner_deduct_period = $2 AND unit_id IN (SELECT id FROM units WHERE property_id <> ALL($3::int[]))`,
+      [orgId, range.start, paidProps],
+    );
+    const maint = await tx.query<{ id: number; property_id: number; cost_cents: number }>(
+      `SELECT m.id, u.property_id, m.cost_cents FROM maintenance_requests m JOIN units u ON u.id = m.unit_id
+       WHERE m.organization_id = $1 AND m.status = 'concluida' AND m.charge_owner AND m.cost_cents > 0
+         AND m.completed_at < $2::date AND m.owner_deduct_period IS NULL
+       ORDER BY m.completed_at, m.id`,
+      [orgId, range.next],
+    );
+    const maintOf = new Map<number, number>();
+    const assigned: number[] = [];
+    // Itens já atribuídos a este mês em imóveis com algum repasse PAGO continuam valendo para os donos que ainda estão pendentes.
+    const kept = await tx.query<{ property_id: number; cost_cents: number }>(
+      `SELECT u.property_id, m.cost_cents FROM maintenance_requests m JOIN units u ON u.id = m.unit_id
+       WHERE m.organization_id = $1 AND m.owner_deduct_period = $2::date ORDER BY m.id`,
+      [orgId, range.start],
+    );
+    for (const k of kept) {
+      const owners = ownersOf.get(k.property_id) ?? [];
+      const share = owners.length ? Math.floor(k.cost_cents / owners.length) : 0;
+      let rest = owners.length ? k.cost_cents - share * owners.length : 0;
+      for (const o of owners) {
+        const extra = rest > 0 ? 1 : 0;
+        rest -= extra;
+        if (!paidOwners.has(o)) maintOf.set(o, (maintOf.get(o) ?? 0) + share + extra);
+      }
+    }
+    for (const m of maint) {
+      const owners = ownersOf.get(m.property_id);
+      if (!owners || owners.length === 0 || owners.some((o) => paidOwners.has(o))) continue;
+      const share = Math.floor(m.cost_cents / owners.length);
+      let rest = m.cost_cents - share * owners.length;
+      const parts = owners.map((o) => {
+        const extra = rest > 0 ? 1 : 0;
+        rest -= extra;
+        return { o, v: share + extra };
+      });
+      const fits = parts.every(({ o, v }) => {
+        const g = gross.get(o) ?? 0;
+        return g - feeOf(g) - (maintOf.get(o) ?? 0) >= v;
+      });
+      if (!fits) continue;
+      for (const { o, v } of parts) maintOf.set(o, (maintOf.get(o) ?? 0) + v);
+      assigned.push(m.id);
+    }
+    if (assigned.length > 0) await tx.query("UPDATE maintenance_requests SET owner_deduct_period = $2::date WHERE id = ANY($1::int[])", [assigned, range.start]);
     // Atualiza no lugar (o id do repasse pendente é estável); repasses pagos nunca são tocados.
     let generated = 0;
     const keep: number[] = [];
     for (const [ownerId, g] of gross) {
       if (paidOwners.has(ownerId) || g <= 0) continue;
-      const fee = Math.round((g * feeBps) / 10000);
+      const fee = feeOf(g);
+      const m = maintOf.get(ownerId) ?? 0;
       await tx.query(
-        `INSERT INTO owner_transfers (organization_id, owner_id, period, gross_cents, fee_cents, net_cents, fee_bps)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO owner_transfers (organization_id, owner_id, period, gross_cents, fee_cents, maintenance_cents, net_cents, fee_bps)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (organization_id, owner_id, period) DO UPDATE
-           SET gross_cents = EXCLUDED.gross_cents, fee_cents = EXCLUDED.fee_cents,
+           SET gross_cents = EXCLUDED.gross_cents, fee_cents = EXCLUDED.fee_cents, maintenance_cents = EXCLUDED.maintenance_cents,
                net_cents = EXCLUDED.net_cents, fee_bps = EXCLUDED.fee_bps, generated_at = now()
            WHERE owner_transfers.status = 'pendente'`,
-        [orgId, ownerId, range.start, g, fee, g - fee, feeBps],
+        [orgId, ownerId, range.start, g, fee, m, g - fee - m, feeBps],
       );
       keep.push(ownerId);
       generated += 1;
@@ -651,21 +751,33 @@ financeRouter.get("/finance/summary", async (req, res) => {
   res.json(await financeSummary(req.auth!.organization.id, String(req.query.month)));
 });
 
+const SETTINGS_COLS = "admin_fee_bps, late_fee_bps, late_interest_bps, late_grace_days, prorata_enabled";
+
 financeRouter.get("/settings/finance", async (req, res) => {
-  const [row] = await db.query<{ admin_fee_bps: number }>("SELECT admin_fee_bps FROM organizations WHERE id = $1", [
-    req.auth!.organization.id,
-  ]);
-  res.json({ admin_fee_bps: row!.admin_fee_bps });
+  const [row] = await db.query(`SELECT ${SETTINGS_COLS} FROM organizations WHERE id = $1`, [req.auth!.organization.id]);
+  res.json(row);
 });
 
+/** Taxa de administração, multa e juros por atraso, carência e pro rata. Aceita qualquer subconjunto dos campos. */
 financeRouter.put("/settings/finance", requireRole("admin"), async (req, res) => {
-  const bps = req.body?.admin_fee_bps;
-  if (!Number.isInteger(bps) || bps < 0 || bps > 10000) {
-    res.status(400).json({ error: "admin_fee_bps deve ser inteiro entre 0 e 10000 (1000 = 10%)" });
-    return;
+  const b = req.body ?? {};
+  const int = (k: string, max: number) => (b[k] === undefined ? undefined : Number.isInteger(b[k]) && b[k] >= 0 && b[k] <= max ? (b[k] as number) : null);
+  const vals = {
+    admin_fee_bps: int("admin_fee_bps", 10000),
+    late_fee_bps: int("late_fee_bps", 1000),
+    late_interest_bps: int("late_interest_bps", 1000),
+    late_grace_days: int("late_grace_days", 30),
+    prorata_enabled: b.prorata_enabled === undefined ? undefined : typeof b.prorata_enabled === "boolean" ? b.prorata_enabled : null,
+  };
+  if (Object.values(vals).some((v) => v === null) || Object.values(vals).every((v) => v === undefined)) {
+    return void res.status(400).json({ error: "Valores inválidos. admin_fee_bps 0–10000; late_fee_bps e late_interest_bps 0–1000 (100 = 1%); late_grace_days 0–30; prorata_enabled true/false." });
   }
-  await db.query("UPDATE organizations SET admin_fee_bps = $1 WHERE id = $2", [bps, req.auth!.organization.id]);
-  res.json({ admin_fee_bps: bps });
+  await db.query(
+    `UPDATE organizations SET admin_fee_bps = COALESCE($2, admin_fee_bps), late_fee_bps = COALESCE($3, late_fee_bps),
+            late_interest_bps = COALESCE($4, late_interest_bps), late_grace_days = COALESCE($5, late_grace_days),
+            prorata_enabled = COALESCE($6, prorata_enabled) WHERE id = $1`,
+    [req.auth!.organization.id, vals.admin_fee_bps ?? null, vals.late_fee_bps ?? null, vals.late_interest_bps ?? null, vals.late_grace_days ?? null, vals.prorata_enabled ?? null],
+  );
+  const [row] = await db.query(`SELECT ${SETTINGS_COLS} FROM organizations WHERE id = $1`, [req.auth!.organization.id]);
+  res.json(row);
 });
-
-
