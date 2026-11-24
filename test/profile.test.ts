@@ -1,6 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { Client, PASSWORD, register, startServer } from "./helpers.js";
+import { Client, PASSWORD, memoryProvider, register, startServer } from "./helpers.js";
 
 let base: string;
 let close: () => Promise<void>;
@@ -53,19 +53,46 @@ describe("meu perfil", () => {
     assert.equal((await new Client(base).call("GET", "/api/profile")).status, 401);
   });
 
-  it("troca de e-mail exige a senha atual e o novo e-mail passa a ser o do login", async () => {
+  it("troca de e-mail só vale depois do link enviado ao endereço NOVO", async () => {
     const a = await register(base, "perfil3@x.com", "P3");
     await register(base, "ocupado3@x.com", "P3b");
+    const mem = await memoryProvider();
     assert.equal((await a.call("POST", "/api/profile/email", { email: "novo3@x.com" })).status, 400, "sem senha");
     assert.equal((await a.call("POST", "/api/profile/email", { email: "novo3@x.com", password: "errada-errada" })).status, 403);
     assert.equal((await a.call("POST", "/api/profile/email", { email: "ocupado3@x.com", password: PASSWORD })).status, 409);
     assert.equal((await a.call("POST", "/api/profile/email", { email: "isso-nao-e-email", password: PASSWORD })).status, 400);
+
     const ok = await a.call("POST", "/api/profile/email", { email: "  NOVO3@x.com ", password: PASSWORD });
-    assert.equal(ok.status, 200, JSON.stringify(ok.body));
-    assert.equal(ok.body.user.email, "novo3@x.com");
+    assert.equal(ok.status, 202, JSON.stringify(ok.body));
+    assert.equal(ok.body.user.email, "perfil3@x.com", "ainda vale o e-mail antigo");
+    assert.equal(ok.body.user.pending_email, "novo3@x.com");
+    assert.equal((await login("perfil3@x.com")).status, 200, "o login antigo continua funcionando até confirmar");
+    assert.equal((await login("novo3@x.com")).status, 401);
+
+    // O link vai ao endereço novo; o clique é do provedor, e o app só espelha o que ele confirmou.
+    const sent = mem.sentEmailChanges.filter((m) => m.email === "novo3@x.com");
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!.link, /^http:\/\/app\.test\//);
+    const token = mem.clickLink(sent[0]!.link);
+    const sync = await new Client(base).call("POST", "/api/auth/email-confirmed", { accessToken: token });
+    assert.equal(sync.status, 200, JSON.stringify(sync.body));
+    assert.equal(sync.body.email, "novo3@x.com");
     assert.equal((await a.call("GET", "/api/auth/me")).body.user.email, "novo3@x.com");
+    assert.equal((await a.call("GET", "/api/profile")).body.user.pending_email, null);
     assert.equal((await login("novo3@x.com")).status, 200);
     assert.equal((await login("perfil3@x.com")).status, 401);
+    assert.equal((await new Client(base).call("POST", "/api/auth/email-confirmed", { accessToken: "lixo" })).status, 400);
+  });
+
+  it("se o app não espelhou o clique, o próximo login com o e-mail novo alinha tudo", async () => {
+    const a = await register(base, "perfil3b@x.com", "P3c");
+    const mem = await memoryProvider();
+    await a.call("POST", "/api/profile/email", { email: "novo3b@x.com", password: PASSWORD });
+    mem.clickLink(mem.sentEmailChanges.find((m) => m.email === "novo3b@x.com")!.link); // clicou, mas o navegador não voltou ao app
+    const r = await login("novo3b@x.com");
+    assert.equal(r.status, 200);
+    assert.equal((await r.c.call("GET", "/api/profile")).body.user.email, "novo3b@x.com");
+    assert.equal((await r.c.call("GET", "/api/profile")).body.user.pending_email, null);
   });
 
   it("troca de senha: confere a atual, derruba as OUTRAS sessões e mantém a atual", async () => {

@@ -4,7 +4,7 @@ import { db, transaction, ROLES, isUniqueViolation, type Role } from "./db.js";
 import { createSession, currentSessionId, requireAuth, requireRole } from "./auth.js";
 import { AuthProviderError, appUrl, getAuthProvider } from "./authProvider.js";
 import { parseId } from "./crud.js";
-import { RateLimiter } from "./ratelimit.js";
+import { SharedRateLimiter } from "./ratelimit.js";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
@@ -14,8 +14,8 @@ const generateTempPassword = (length = 14) =>
   Array.from({ length }, () => TEMP_ALPHABET[crypto.randomInt(TEMP_ALPHABET.length)]).join("");
 
 const hashToken = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
-const acceptLimiter = new RateLimiter(Number(process.env.ACCEPT_RATE_MAX ?? 20), 15 * 60 * 1000);
-const resetLimiter = new RateLimiter(10, 60 * 60 * 1000);
+const acceptLimiter = new SharedRateLimiter("accept", Number(process.env.ACCEPT_RATE_MAX ?? 20), 15 * 60 * 1000);
+const resetLimiter = new SharedRateLimiter("team-reset", 10, 60 * 60 * 1000);
 
 export const teamRouter = Router();
 const adminOnly = [requireAuth, requireRole("admin")];
@@ -155,7 +155,7 @@ teamRouter.post("/members/:userId/password-reset", ...adminOnly, async (req, res
     res.status(404).json({ error: "Não encontrado" });
     return;
   }
-  if (!resetLimiter.allow(`org:${orgId}`)) {
+  if (!(await resetLimiter.allow(`org:${orgId}`))) {
     res.status(429).json({ error: "Muitas redefinições. Tente novamente mais tarde." });
     return;
   }
@@ -204,6 +204,31 @@ teamRouter.post("/members/:userId/password-reset", ...adminOnly, async (req, res
     }
     throw err;
   }
+});
+
+/**
+ * Perdeu o celular e os códigos de recuperação: o admin desativa o 2FA da pessoa (ela entra só com a senha e configura de novo).
+ * Só para quem pertence apenas a esta organização, para um admin nunca mexer na segurança de contas de outras organizações.
+ */
+teamRouter.post("/members/:userId/mfa-reset", ...adminOnly, async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  const userId = parseId(req.params.userId);
+  const [member] = userId
+    ? await db.query<{ orgs: string }>(
+        `SELECT (SELECT count(*) FROM organization_members x WHERE x.user_id = m.user_id)::text AS orgs
+         FROM organization_members m WHERE m.organization_id = $1 AND m.user_id = $2`,
+        [orgId, userId],
+      )
+    : [];
+  if (!member) return void res.status(404).json({ error: "Não encontrado" });
+  if (Number(member.orgs) > 1) return void res.status(409).json({ error: "Este usuário pertence a outras organizações. Ele mesmo deve desativar o 2FA." });
+  await transaction(async (tx) => {
+    await tx.query("DELETE FROM user_mfa WHERE user_id = $1", [userId]);
+    await tx.query("DELETE FROM mfa_recovery_codes WHERE user_id = $1", [userId]);
+    await tx.query("DELETE FROM mfa_challenges WHERE user_id = $1", [userId]);
+    await tx.query("DELETE FROM sessions WHERE user_id = $1 AND id <> $2", [userId, currentSessionId(req) ?? ""]);
+  });
+  res.status(204).end();
 });
 
 // ------------------------------------------------------------------ Convites (admin)
@@ -293,7 +318,7 @@ async function findInvite(token: string): Promise<InviteRow | undefined> {
 }
 
 teamRouter.get("/invitations/by-token/:token", async (req, res) => {
-  if (!acceptLimiter.allow(`view:${req.ip}`)) {
+  if (!(await acceptLimiter.allow(`view:${req.ip}`))) {
     res.status(429).json({ error: "Muitas tentativas" });
     return;
   }
@@ -312,7 +337,7 @@ teamRouter.get("/invitations/by-token/:token", async (req, res) => {
 });
 
 teamRouter.post("/invitations/by-token/:token/accept", async (req, res) => {
-  if (!acceptLimiter.allow(`accept:${req.ip}`)) {
+  if (!(await acceptLimiter.allow(`accept:${req.ip}`))) {
     res.status(429).json({ error: "Muitas tentativas" });
     return;
   }
@@ -392,7 +417,7 @@ teamRouter.post("/invitations/by-token/:token/accept", async (req, res) => {
     throw err;
   }
 
-  await createSession(res, userId, invite.organization_id);
+  await createSession(res, userId, invite.organization_id, req);
   res.status(201).json({
     user: { id: userId, name: userName, email: invite.email },
     organization: { id: invite.organization_id, name: invite.organization_name },

@@ -5,7 +5,9 @@ import { db, transaction, isUniqueViolation, type Role } from "./db.js";
 import { createSession, currentSessionId, destroySession, loadAuth, requireAuth, requireRole } from "./auth.js";
 import { AuthProviderError, appUrl, getAuthProvider } from "./authProvider.js";
 import { crudRouter, parseId, type Field } from "./crud.js";
-import { RateLimiter } from "./ratelimit.js";
+import { SharedRateLimiter } from "./ratelimit.js";
+import { csrfGuard } from "./csrf.js";
+import { mfaRouter, startMfaChallenge, userHasMfa } from "./mfa.js";
 import { teamRouter } from "./team.js";
 import { contractsRouter } from "./contracts.js";
 import { portalRouter } from "./portal.js";
@@ -57,14 +59,17 @@ export function createApp() {
   // A importação em massa tem o próprio limite de corpo (ver importer.ts); o resto da API aceita 100 KB.
   const smallJson = express.json({ limit: "100kb" });
   app.use((req, res, next) => (req.path === "/api/import" ? next() : smallJson(req, res, next)));
+  app.use("/api", csrfGuard);
   app.use(loadAuth);
   app.use(auditMiddleware);
 
-  // Limites contra força bruta e abuso de e-mails (em memória, por instância).
-  const loginLimiter = new RateLimiter(10, 15 * 60 * 1000);
-  const forgotLimiter = new RateLimiter(5, 60 * 60 * 1000);
-  const registerLimiter = new RateLimiter(Number(process.env.REGISTER_RATE_MAX ?? 10), 60 * 60 * 1000);
-  const resetLimiter = new RateLimiter(10, 15 * 60 * 1000);
+  // Limites contra força bruta e abuso de e-mails. Ficam no banco: valem entre instâncias (Vercel).
+  const loginLimiter = new SharedRateLimiter("login", 10, 15 * 60 * 1000);
+  const forgotLimiter = new SharedRateLimiter("forgot", 5, 60 * 60 * 1000);
+  const registerLimiter = new SharedRateLimiter("register", Number(process.env.REGISTER_RATE_MAX ?? 10), 60 * 60 * 1000);
+  const resetLimiter = new SharedRateLimiter("reset", 10, 15 * 60 * 1000);
+  const verifyLimiter = new SharedRateLimiter("verify", 5, 60 * 60 * 1000);
+  const requireVerification = () => process.env.REQUIRE_EMAIL_VERIFICATION === "1";
 
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", service: "ethos" });
@@ -88,7 +93,7 @@ export function createApp() {
       res.status(400).json({ error: "Informe nome, e-mail válido e senha com 8+ caracteres" });
       return;
     }
-    if (!registerLimiter.allow(`register:${req.ip}`)) {
+    if (!(await registerLimiter.allow(`register:${req.ip}`))) {
       res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
       return;
     }
@@ -101,7 +106,7 @@ export function createApp() {
     let authId: string | undefined;
     let created: { userId: number; orgId: number };
     try {
-      authId = (await provider.createUser(cleanEmail, password)).id;
+      authId = (await provider.createUser(cleanEmail, password, { confirmed: !requireVerification() })).id;
       created = await transaction(async (tx) => {
         const [org] = await tx.query<{ id: number }>("INSERT INTO organizations (name) VALUES ($1) RETURNING id", [
           orgName,
@@ -129,7 +134,13 @@ export function createApp() {
       }
       throw err;
     }
-    await createSession(res, created.userId, created.orgId);
+    if (requireVerification()) {
+      // E-mail ainda não confirmado: sem sessão até clicar no link (o Supabase recusa o login até lá).
+      await provider.sendVerification(cleanEmail, `${appUrl()}/`).catch((err) => console.error("Falha ao enviar verificação:", err instanceof Error ? err.message : err));
+      res.status(201).json({ verification_required: true, email: cleanEmail });
+      return;
+    }
+    await createSession(res, created.userId, created.orgId, req);
     res.status(201).json({
       user: { id: created.userId, name: name.trim(), email: cleanEmail },
       organization: { id: created.orgId, name: orgName },
@@ -145,15 +156,39 @@ export function createApp() {
     }
     const cleanEmail = email.trim().toLowerCase();
     const limitKey = `login:${req.ip}:${cleanEmail}`;
-    if (!loginLimiter.allow(limitKey)) {
+    if (!(await loginLimiter.allow(limitKey))) {
       res.status(429).json({ error: "Muitas tentativas. Tente novamente em alguns minutos." });
       return;
     }
-    const [user] = await db.query<{ id: number; name: string; email: string; auth_id: string }>(
-      "SELECT id, name, email, auth_id FROM users WHERE email = $1",
+    type LoginUser = { id: number; name: string; email: string; auth_id: string };
+    let [user]: (LoginUser | undefined)[] = await db.query<LoginUser>(
+      "SELECT id, name, email, auth_id FROM users WHERE email = $1 AND deleted_at IS NULL",
       [cleanEmail],
     );
-    const verified = user ? await getAuthProvider().verifyCredentials(cleanEmail, password) : null;
+    let verified: { id: string } | null = null;
+    try {
+      verified = await getAuthProvider().verifyCredentials(cleanEmail, password);
+    } catch (err) {
+      if (err instanceof AuthProviderError && err.code === "unconfirmed") {
+        res.status(403).json({ error: "Confirme o seu e-mail pelo link que enviamos antes de entrar.", code: "email_unconfirmed" });
+        return;
+      }
+      throw err;
+    }
+    if (!user && verified) {
+      // O e-mail mudou no provedor (link de troca confirmado) e o app ainda não sincronizou: alinha agora.
+      [user] = await db.query<LoginUser>(
+        "SELECT id, name, email, auth_id FROM users WHERE auth_id = $1 AND deleted_at IS NULL",
+        [verified.id],
+      );
+      if (user) {
+        const taken = await db.query("SELECT 1 FROM users WHERE email = $1 AND id <> $2", [cleanEmail, user.id]);
+        if (taken.length === 0) {
+          await db.query("UPDATE users SET email = $1, pending_email = NULL, pending_email_at = NULL WHERE id = $2", [cleanEmail, user.id]);
+          user.email = cleanEmail;
+        } else user = undefined;
+      }
+    }
     if (!user || !verified || verified.id !== user.auth_id) {
       if (user) {
         // Registra a tentativa falha em cada organização do usuário (o admin enxerga só a sua).
@@ -171,7 +206,7 @@ export function createApp() {
       res.status(401).json({ error: "E-mail ou senha incorretos" });
       return;
     }
-    loginLimiter.reset(limitKey);
+    await loginLimiter.reset(limitKey);
     const [membership] = await db.query<{ id: number; name: string; role: Role }>(
       `SELECT o.id, o.name, m.role FROM organization_members m
        JOIN organizations o ON o.id = m.organization_id
@@ -182,7 +217,12 @@ export function createApp() {
       res.status(403).json({ error: "Usuário sem organização" });
       return;
     }
-    await createSession(res, user.id, membership.id);
+    if (await userHasMfa(user.id)) {
+      // Senha certa, mas há segundo fator: ainda não é sessão. O navegador devolve o código em /api/auth/mfa.
+      res.json({ mfa_required: true, mfa_token: await startMfaChallenge(user.id, membership.id) });
+      return;
+    }
+    await createSession(res, user.id, membership.id, req);
     res.json({
       user: { id: user.id, name: user.name, email: user.email },
       organization: { id: membership.id, name: membership.name },
@@ -195,8 +235,12 @@ export function createApp() {
     res.status(204).end();
   });
 
-  app.get("/api/auth/me", (req, res) => {
-    res.json(req.auth ?? { user: null });
+  app.get("/api/auth/me", async (req, res) => {
+    if (!req.auth) return void res.json({ user: null });
+    if (req.auth.viaApiKey) return void res.json(req.auth);
+    // O carimbo da foto de perfil deixa o menu mostrar a imagem e renovar o cache quando ela muda.
+    const [a] = await db.query<{ v: number }>("SELECT (extract(epoch FROM updated_at) * 1000)::bigint::float8 AS v FROM user_avatars WHERE user_id = $1", [req.auth.user.id]);
+    res.json({ ...req.auth, user: { ...req.auth.user, avatar_version: a?.v ?? null } });
   });
 
   // Recuperação de senha: o Supabase envia o e-mail com um link para o app.
@@ -207,7 +251,7 @@ export function createApp() {
       res.status(400).json({ error: "Informe um e-mail válido" });
       return;
     }
-    if (forgotLimiter.allow(`forgot:${req.ip}:${email}`)) {
+    if (await forgotLimiter.allow(`forgot:${req.ip}:${email}`)) {
       const known = await db.query("SELECT 1 FROM users WHERE email = $1", [email]);
       if (known.length > 0) {
         try {
@@ -231,7 +275,7 @@ export function createApp() {
       res.status(400).json({ error: "A senha deve ter 8+ caracteres" });
       return;
     }
-    if (!resetLimiter.allow(`reset:${req.ip}`)) {
+    if (!(await resetLimiter.allow(`reset:${req.ip}`))) {
       res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
       return;
     }
@@ -264,6 +308,52 @@ export function createApp() {
       });
     }
     res.status(204).end();
+  });
+
+  // Reenvio do link de verificação do cadastro. Sempre 204 (não revela se o e-mail existe).
+  app.post("/api/auth/resend-verification", async (req, res) => {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 200) {
+      res.status(400).json({ error: "Informe um e-mail válido" });
+      return;
+    }
+    if (requireVerification() && (await verifyLimiter.allow(`verify:${req.ip}:${email}`))) {
+      const known = await db.query("SELECT 1 FROM users WHERE email = $1 AND deleted_at IS NULL", [email]);
+      if (known.length > 0) await getAuthProvider().sendVerification(email, `${appUrl()}/`).catch((err) => console.error("Falha ao reenviar verificação:", err instanceof Error ? err.message : err));
+    }
+    res.status(204).end();
+  });
+
+  // O link de confirmação de troca de e-mail volta ao app com um access_token: quem manda é o provedor,
+  // então o e-mail DELE é a verdade. O app só espelha o que o provedor já confirmou.
+  app.post("/api/auth/email-confirmed", async (req, res) => {
+    const token = req.body?.accessToken;
+    if (typeof token !== "string" || !token) {
+      res.status(400).json({ error: "Dados inválidos" });
+      return;
+    }
+    if (!(await resetLimiter.allow(`confirm:${req.ip}`))) {
+      res.status(429).json({ error: "Muitas tentativas. Tente novamente mais tarde." });
+      return;
+    }
+    const owner = await getAuthProvider().userFromRecoveryToken(token);
+    if (!owner || !owner.email) {
+      res.status(400).json({ error: "Link inválido ou expirado." });
+      return;
+    }
+    const email = owner.email.toLowerCase();
+    const [user] = await db.query<{ id: number; email: string }>("SELECT id, email FROM users WHERE auth_id = $1 AND deleted_at IS NULL", [owner.id]);
+    if (user && user.email !== email) {
+      const taken = await db.query("SELECT 1 FROM users WHERE email = $1 AND id <> $2", [email, user.id]);
+      if (taken.length > 0) {
+        res.status(409).json({ error: "Este e-mail já pertence a outra conta." });
+        return;
+      }
+      await db.query("UPDATE users SET email = $1, pending_email = NULL, pending_email_at = NULL WHERE id = $2", [email, user.id]);
+    } else if (user) {
+      await db.query("UPDATE users SET pending_email = NULL, pending_email_at = NULL WHERE id = $1", [user.id]);
+    }
+    res.json({ email });
   });
 
   // ---------- Organizações do usuário ----------
@@ -302,6 +392,7 @@ export function createApp() {
   // ---------- Financeiro ----------
   app.use("/api", financeRouter);
   app.use("/api", boletosRouter);
+  app.use("/api", mfaRouter);
   app.use("/api", profileRouter);
   app.use("/api", householdRouter);
 

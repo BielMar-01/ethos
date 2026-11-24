@@ -19,6 +19,8 @@ const message = (e: unknown) => (e instanceof Error ? e.message : 'Erro inespera
 /** Lê o que o link de e-mail / convite trouxe e limpa a URL. */
 type Entry =
   | { kind: 'reset'; accessToken: string }
+  | { kind: 'emailChange'; accessToken: string }
+  | { kind: 'signup' }
   | { kind: 'linkError'; text: string }
   | { kind: 'invite'; token: string }
   | { kind: 'none' }
@@ -29,10 +31,14 @@ function readEntry(): Entry {
   let entry: Entry = { kind: 'none' }
   if (hash.get('type') === 'recovery' && hash.get('access_token')) {
     entry = { kind: 'reset', accessToken: hash.get('access_token')! }
+  } else if (hash.get('type') === 'email_change' && hash.get('access_token')) {
+    entry = { kind: 'emailChange', accessToken: hash.get('access_token')! }
+  } else if (hash.get('type') === 'signup' && hash.get('access_token')) {
+    entry = { kind: 'signup' }
   } else if (hash.get('error')) {
     entry = {
       kind: 'linkError',
-      text: 'Este link é inválido ou expirou. Solicite uma nova recuperação de senha.',
+      text: 'Este link é inválido ou expirou. Solicite um novo (recuperação de senha, e-mail ou confirmação de cadastro).',
     }
   } else if (query.get('invite')) {
     entry = { kind: 'invite', token: query.get('invite')! }
@@ -77,11 +83,24 @@ function AuthForm({ onAuth, notice, initialMode = 'login' }: { onAuth: (s: Sessi
   const [error, setError] = useState('')
   const [info, setInfo] = useState(notice ?? '')
   const [busy, setBusy] = useState(false)
+  // Verificação em duas etapas: depois da senha certa o servidor devolve um desafio e espera o código.
+  const [challenge, setChallenge] = useState<string | null>(null)
+  const [code, setCode] = useState('')
 
   function switchMode(next: typeof mode) {
     setError('')
     setInfo('')
     setMode(next)
+  }
+
+  async function resend() {
+    setError('')
+    try {
+      await api.resendVerification(email)
+      setInfo('Se o e-mail estiver aguardando confirmação, enviamos um novo link.')
+    } catch (err) {
+      setError(message(err))
+    }
   }
 
   async function submit(e: FormEvent) {
@@ -93,18 +112,62 @@ function AuthForm({ onAuth, notice, initialMode = 'login' }: { onAuth: (s: Sessi
       if (mode === 'forgot') {
         await api.forgot(email)
         setInfo('Se o e-mail estiver cadastrado, você receberá um link para redefinir a senha.')
+      } else if (challenge) {
+        onAuth(await api.mfa(challenge, code))
+      } else if (mode === 'login') {
+        const r = await api.login(email, password)
+        if ('mfa_required' in r) {
+          setChallenge(r.mfa_token)
+          setPassword('')
+          setCode('')
+        } else onAuth(r)
       } else {
-        onAuth(
-          mode === 'login'
-            ? await api.login(email, password)
-            : await api.register(name, email, password, organization),
-        )
+        const r = await api.register(name, email, password, organization)
+        if ('verification_required' in r) {
+          setPassword('')
+          setMode('login')
+          setInfo(`Enviamos um link de confirmação para ${r.email}. Clique nele e depois entre aqui.`)
+        } else onAuth(r)
       }
     } catch (err) {
-      setError(message(err))
+      const text = message(err)
+      setError(text)
+      // Desafio vencido ou queimado por erros: volta para e-mail e senha.
+      if (challenge && /Entre novamente/.test(text)) {
+        setChallenge(null)
+        setCode('')
+      }
     } finally {
       setBusy(false)
     }
+  }
+
+  if (challenge) {
+    return (
+      <Page title="Verificação em duas etapas" onSubmit={submit}>
+        <p className="muted">Abra o aplicativo autenticador e digite o código de 6 dígitos. Sem o celular, use um dos seus códigos de recuperação.</p>
+        <label>
+          Código
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            inputMode="text"
+            autoComplete="one-time-code"
+            autoFocus
+            required
+            maxLength={20}
+            aria-label="Código de verificação"
+          />
+        </label>
+        {error && <Alert>{error}</Alert>}
+        <button type="submit" className="primary" disabled={busy || !code.trim()}>
+          Confirmar
+        </button>
+        <button type="button" className="link" onClick={() => { setChallenge(null); setCode(''); setError('') }}>
+          Voltar
+        </button>
+      </Page>
+    )
   }
 
   return (
@@ -142,6 +205,11 @@ function AuthForm({ onAuth, notice, initialMode = 'login' }: { onAuth: (s: Sessi
       <button type="submit" className="primary" disabled={busy}>
         {mode === 'login' ? 'Entrar' : mode === 'register' ? 'Cadastrar' : 'Enviar link de recuperação'}
       </button>
+      {mode === 'login' && /Confirme o seu e-mail/.test(error) && email && (
+        <button type="button" className="link" onClick={resend}>
+          Reenviar o link de confirmação
+        </button>
+      )}
       {mode === 'login' && (
         <button type="button" className="link" onClick={() => switchMode('forgot')}>
           Esqueci minha senha
@@ -196,6 +264,36 @@ function ResetPassword({ accessToken, onDone }: { accessToken: string; onDone: (
       {error && <Alert>{error}</Alert>}
       <button type="submit" className="primary" disabled={busy}>
         Salvar nova senha
+      </button>
+    </Page>
+  )
+}
+
+/** Destino do link de confirmação de e-mail: troca de e-mail (espelha no app) ou cadastro. */
+function ConfirmEmail({ entry, onDone }: { entry: { kind: 'emailChange'; accessToken: string } | { kind: 'signup' }; onDone: () => void }) {
+  const [state, setState] = useState<'working' | 'ok' | 'error'>(entry.kind === 'emailChange' ? 'working' : 'ok')
+  const [text, setText] = useState(entry.kind === 'signup' ? 'E-mail confirmado! Agora é só entrar com o seu e-mail e senha.' : '')
+
+  useEffect(() => {
+    if (entry.kind !== 'emailChange') return
+    api
+      .emailConfirmed(entry.accessToken)
+      .then((r) => {
+        setText(`Pronto: o e-mail de acesso agora é ${r.email}. Entre usando o novo e-mail.`)
+        setState('ok')
+      })
+      .catch((err) => {
+        setText(message(err))
+        setState('error')
+      })
+  }, [entry])
+
+  if (state === 'working') return <Loading label="Confirmando o novo e-mail…" />
+  return (
+    <Page title={state === 'ok' ? 'E-mail confirmado' : 'Não foi possível confirmar'}>
+      {state === 'ok' ? <p className="notice" role="status">{text}</p> : <Alert>{text}</Alert>}
+      <button type="button" className="primary" onClick={onDone}>
+        Ir para o login
       </button>
     </Page>
   )
@@ -317,6 +415,24 @@ export default function App() {
           setNotice('Senha alterada. Entre com a nova senha.')
           setEntry({ kind: 'none' })
           go('login')
+        }}
+      />
+    )
+  }
+  if (entry.kind === 'emailChange' || entry.kind === 'signup') {
+    return (
+      <ConfirmEmail
+        entry={entry}
+        onDone={() => {
+          setEntry({ kind: 'none' })
+          // Se o link foi aberto no mesmo navegador já logado, volta ao painel; senão vai ao login.
+          api
+            .me()
+            .then((r) => {
+              if ('role' in r) setSession(r)
+              else go('login')
+            })
+            .catch(() => go('login'))
         }}
       />
     )

@@ -2,6 +2,19 @@ export interface User {
   id: number
   name: string
   email: string
+  /** Carimbo da foto de perfil (para renovar o cache); ausente = sem foto. */
+  avatar_version?: number | null
+}
+
+/** Senha certa, mas há verificação em duas etapas: falta o código. */
+export interface MfaChallenge {
+  mfa_required: true
+  mfa_token: string
+}
+/** Cadastro feito, mas o e-mail precisa ser confirmado pelo link antes do primeiro acesso. */
+export interface VerificationNotice {
+  verification_required: true
+  email: string
 }
 
 export type Role = 'admin' | 'colaborador' | 'proprietario' | 'inquilino'
@@ -300,12 +313,16 @@ export const json = (method: string, body: unknown): RequestInit => ({
 export const api = {
   me: () => request<Session | { user: null }>('/api/auth/me'),
   login: (email: string, password: string) =>
-    request<Session>('/api/auth/login', json('POST', { email, password })),
+    request<Session | MfaChallenge>('/api/auth/login', json('POST', { email, password })),
+  mfa: (mfaToken: string, code: string) =>
+    request<Session>('/api/auth/mfa', json('POST', { mfa_token: mfaToken, code })),
   register: (name: string, email: string, password: string, organizationName: string) =>
-    request<Session>(
+    request<Session | VerificationNotice>(
       '/api/auth/register',
       json('POST', { name, email, password, organizationName }),
     ),
+  resendVerification: (email: string) => request<void>('/api/auth/resend-verification', json('POST', { email })),
+  emailConfirmed: (accessToken: string) => request<{ email: string }>('/api/auth/email-confirmed', json('POST', { accessToken })),
   logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
   forgot: (email: string) => request<void>('/api/auth/forgot', json('POST', { email })),
   reset: (accessToken: string, password: string) =>
@@ -400,6 +417,7 @@ export const api = {
   removeMember: (id: number) => request<void>(`/api/members/${id}`, { method: 'DELETE' }),
   memberPasswordReset: (id: number, mode: 'email' | 'link' | 'password', password?: string) =>
     request<{ sent?: boolean; link?: string; changed?: boolean; password?: string }>(`/api/members/${id}/password-reset`, json('POST', { mode, password })),
+  memberMfaReset: (id: number) => request<void>(`/api/members/${id}/mfa-reset`, { method: 'POST' }),
   invitations: () => request<{ invitations: Invitation[] }>('/api/invitations'),
   createInvitation: (email: string, role: Role, link?: { tenantId?: number; ownerId?: number }) =>
     request<{ invitation: Invitation; link: string }>('/api/invitations', json('POST', { email, role, ...link })),

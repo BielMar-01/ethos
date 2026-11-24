@@ -19,7 +19,7 @@
    | `CRON_SECRET` | texto longo e aleatório (ex.: `openssl rand -hex 32`) |
    | `INTEGRATIONS_SECRET` | texto aleatório de 32+ caracteres (`openssl rand -base64 48`). Cifra as chaves de integrações. **Guarde uma cópia: se perder ou trocar, as chaves salvas ficam ilegíveis e precisam ser cadastradas de novo.** |
    | `ANTHROPIC_API_KEY` | (opcional) liga a leitura automática de documentos; sem ela a tela avisa que está desligada. Cada leitura é cobrada pela Anthropic. |
-4. Supabase → *Authentication → URL Configuration*: **Site URL** = `APP_URL` e adicione-a em **Redirect URLs**. Configure também um **SMTP próprio** (o padrão tem limite baixo).
+4. Supabase → *Authentication → URL Configuration*: **Site URL** = `APP_URL` e adicione-a em **Redirect URLs**. Configure também um **SMTP próprio** (o padrão tem limite baixo). **A troca de e-mail e a verificação de cadastro dependem desse envio**: o Supabase manda o link ao endereço novo. Em *Authentication → Providers → Email*, "Secure email change" ligado (padrão) pede a confirmação também no e-mail antigo; desligado, basta clicar no novo. Opcional: `REQUIRE_EMAIL_VERIFICATION=1` exige confirmar o e-mail no cadastro público. O 2FA exige `INTEGRATIONS_SECRET`.
 5. Faça o deploy. Confira: `https://…/api/health` → `{"status":"ok"}`; abra o app, cadastre/entre e teste "Esqueci minha senha".
 6. Domínio próprio: *Settings → Domains* (HTTPS é automático). Atualize `APP_URL` e as Redirect URLs.
 

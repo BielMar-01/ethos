@@ -4,7 +4,7 @@ import { hashPassword, verifyPassword } from "./auth.js";
 /** Falhas do provedor de identidade que a API sabe traduzir em resposta HTTP. */
 export class AuthProviderError extends Error {
   constructor(
-    public code: "exists" | "weak_password" | "rate_limited" | "unavailable",
+    public code: "exists" | "weak_password" | "rate_limited" | "unavailable" | "unconfirmed",
     message?: string,
   ) {
     super(message ?? code);
@@ -16,19 +16,25 @@ export class AuthProviderError extends Error {
  * Produção: Supabase Auth. Testes: implementação em memória.
  */
 export interface AuthProvider {
-  createUser(email: string, password: string): Promise<{ id: string }>;
+  /** `confirmed: false` deixa o e-mail pendente até o usuário clicar no link (ver sendVerification). */
+  createUser(email: string, password: string, opts?: { confirmed?: boolean }): Promise<{ id: string }>;
   deleteUser(id: string): Promise<void>;
-  /** Devolve o id do usuário se as credenciais forem válidas; senão null. */
+  /** Devolve o id do usuário se as credenciais forem válidas; senão null. Lança "unconfirmed" se a senha confere mas o e-mail não foi verificado. */
   verifyCredentials(email: string, password: string): Promise<{ id: string } | null>;
   /** Envia o e-mail de recuperação (não revela se o e-mail existe). */
   sendRecovery(email: string, redirectTo: string): Promise<void>;
   /** Gera o link de recuperação sem enviar e-mail (uso do administrador). */
   generateRecoveryLink(email: string, redirectTo: string): Promise<string>;
   /** Valida o access_token de um link de recuperação e devolve o usuário dono. */
-  userFromRecoveryToken(token: string): Promise<{ id: string } | null>;
+  userFromRecoveryToken(token: string): Promise<{ id: string; email: string } | null>;
   setPassword(id: string, password: string): Promise<void>;
-  /** Troca o e-mail de login (já confirmado: quem troca provou a senha atual). */
-  updateEmail(id: string, email: string): Promise<void>;
+  /** Envia o link de verificação do cadastro (só vale para e-mail ainda não confirmado). */
+  sendVerification(email: string, redirectTo: string): Promise<void>;
+  /**
+   * Pede a troca de e-mail: o provedor envia o link de confirmação ao endereço NOVO e só troca o login depois do
+   * clique. Exige a senha (o provedor abre uma sessão própria com ela). Lança "exists" se o e-mail já é de outra conta.
+   */
+  requestEmailChange(email: string, password: string, newEmail: string, redirectTo: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------- Supabase
@@ -71,11 +77,11 @@ class SupabaseAuthProvider implements AuthProvider {
     return { status: res.status, json };
   }
 
-  async createUser(email: string, password: string) {
+  async createUser(email: string, password: string, opts: { confirmed?: boolean } = {}) {
     const { status, json } = await this.call("/auth/v1/admin/users", {
       key: this.secretKey,
-      // E-mail marcado como confirmado: o convite/cadastro já foi controlado pelo app.
-      body: { email, password, email_confirm: true },
+      // Por padrão o e-mail já nasce confirmado (convite/cadastro controlado pelo app); `confirmed:false` exige o link.
+      body: { email, password, email_confirm: opts.confirmed !== false },
     });
     if (status === 422 && json.error_code === "weak_password") throw new AuthProviderError("weak_password", json.msg);
     if (status === 422 || json.error_code === "email_exists") throw new AuthProviderError("exists");
@@ -92,6 +98,7 @@ class SupabaseAuthProvider implements AuthProvider {
       key: this.publishableKey,
       body: { email, password },
     });
+    if (json.error_code === "email_not_confirmed") throw new AuthProviderError("unconfirmed");
     if (status === 400 || status === 401 || status === 422) return null;
     if (status >= 400 || !json.user?.id) throw new AuthProviderError("unavailable", `login falhou (HTTP ${status})`);
     return { id: String(json.user.id) };
@@ -124,7 +131,7 @@ class SupabaseAuthProvider implements AuthProvider {
       bearer: token,
     });
     if (status >= 400 || !json.id) return null;
-    return { id: String(json.id) };
+    return { id: String(json.id), email: String(json.email ?? "") };
   }
 
   async setPassword(id: string, password: string) {
@@ -137,14 +144,27 @@ class SupabaseAuthProvider implements AuthProvider {
     if (status >= 400) throw new AuthProviderError("unavailable", `setPassword falhou (HTTP ${status})`);
   }
 
-  async updateEmail(id: string, email: string) {
-    const { status, json } = await this.call(`/auth/v1/admin/users/${encodeURIComponent(id)}`, {
+  async sendVerification(email: string, redirectTo: string) {
+    const { status } = await this.call(`/auth/v1/resend?redirect_to=${encodeURIComponent(redirectTo)}`, {
+      key: this.publishableKey,
+      body: { type: "signup", email },
+    });
+    if (status >= 400) throw new AuthProviderError("unavailable", `resend falhou (HTTP ${status})`);
+  }
+
+  async requestEmailChange(email: string, password: string, newEmail: string, redirectTo: string) {
+    // O pedido de troca de e-mail é do PRÓPRIO usuário (token dele): o provedor manda o link ao endereço novo.
+    const login = await this.call("/auth/v1/token?grant_type=password", { key: this.publishableKey, body: { email, password } });
+    const token = login.json.access_token;
+    if (login.status >= 400 || typeof token !== "string") throw new AuthProviderError("unavailable", `login falhou (HTTP ${login.status})`);
+    const { status, json } = await this.call(`/auth/v1/user?redirect_to=${encodeURIComponent(redirectTo)}`, {
       method: "PUT",
-      key: this.secretKey,
-      body: { email, email_confirm: true },
+      key: this.publishableKey,
+      bearer: token,
+      body: { email: newEmail },
     });
     if (status === 422 || json.error_code === "email_exists") throw new AuthProviderError("exists");
-    if (status >= 400) throw new AuthProviderError("unavailable", `updateEmail falhou (HTTP ${status})`);
+    if (status >= 400) throw new AuthProviderError("unavailable", `updateUser falhou (HTTP ${status})`);
   }
 }
 
@@ -152,16 +172,35 @@ class SupabaseAuthProvider implements AuthProvider {
 
 /** Implementação em memória para testes. Expõe o que seria enviado por e-mail. */
 export class MemoryAuthProvider implements AuthProvider {
-  private users = new Map<string, { id: string; email: string; hash: string }>();
+  private users = new Map<string, { id: string; email: string; hash: string; confirmed: boolean; pending?: string }>();
   private tokens = new Map<string, string>();
   /** Links de recuperação "enviados" por e-mail (para os testes lerem). */
   sentRecoveries: { email: string; link: string }[] = [];
+  /** Links de verificação de cadastro e de troca de e-mail "enviados" (o de troca vai ao endereço NOVO). */
+  sentVerifications: { email: string; link: string }[] = [];
+  sentEmailChanges: { email: string; link: string }[] = [];
 
-  async createUser(email: string, password: string) {
+  async createUser(email: string, password: string, opts: { confirmed?: boolean } = {}) {
     if ([...this.users.values()].some((u) => u.email === email)) throw new AuthProviderError("exists");
     const id = crypto.randomUUID();
-    this.users.set(id, { id, email, hash: hashPassword(password) });
+    this.users.set(id, { id, email, hash: hashPassword(password), confirmed: opts.confirmed !== false });
     return { id };
+  }
+
+  /** Simula o clique no link recebido por e-mail: confirma o cadastro / efetiva a troca e devolve o access_token do redirecionamento. */
+  clickLink(link: string): string {
+    const params = new URLSearchParams(link.split("#")[1] ?? "");
+    const [kind, uid] = (params.get("access_token") ?? "").split(":");
+    const u = this.users.get(uid ?? "");
+    if (!u) throw new Error("link inválido");
+    if (kind === "memsignup") u.confirmed = true;
+    else if (kind === "memec" && u.pending) {
+      u.email = u.pending;
+      u.pending = undefined;
+    }
+    const token = "mem-" + crypto.randomBytes(16).toString("hex");
+    this.tokens.set(token, u.id);
+    return token;
   }
 
   async deleteUser(id: string) {
@@ -170,7 +209,9 @@ export class MemoryAuthProvider implements AuthProvider {
 
   async verifyCredentials(email: string, password: string) {
     const u = [...this.users.values()].find((x) => x.email === email);
-    return u && verifyPassword(password, u.hash) ? { id: u.id } : null;
+    if (!u || !verifyPassword(password, u.hash)) return null;
+    if (!u.confirmed) throw new AuthProviderError("unconfirmed");
+    return { id: u.id };
   }
 
   private makeLink(email: string, redirectTo: string): string | undefined {
@@ -194,7 +235,8 @@ export class MemoryAuthProvider implements AuthProvider {
 
   async userFromRecoveryToken(token: string) {
     const id = this.tokens.get(token);
-    return id ? { id } : null;
+    const u = id ? this.users.get(id) : undefined;
+    return u ? { id: u.id, email: u.email } : null;
   }
 
   async setPassword(id: string, password: string) {
@@ -204,11 +246,17 @@ export class MemoryAuthProvider implements AuthProvider {
     for (const [t, uid] of this.tokens) if (uid === id) this.tokens.delete(t);
   }
 
-  async updateEmail(id: string, email: string) {
-    const u = this.users.get(id);
-    if (!u) throw new AuthProviderError("unavailable", "usuário inexistente");
-    if ([...this.users.values()].some((x) => x.email === email && x.id !== id)) throw new AuthProviderError("exists");
-    u.email = email;
+  async sendVerification(email: string, redirectTo: string) {
+    const u = [...this.users.values()].find((x) => x.email === email && !x.confirmed);
+    if (u) this.sentVerifications.push({ email, link: `${redirectTo}#access_token=memsignup:${u.id}&type=signup` });
+  }
+
+  async requestEmailChange(email: string, password: string, newEmail: string, redirectTo: string) {
+    const u = [...this.users.values()].find((x) => x.email === email);
+    if (!u || !verifyPassword(password, u.hash)) throw new AuthProviderError("unavailable", "credenciais inválidas");
+    if ([...this.users.values()].some((x) => x.email === newEmail && x.id !== u.id)) throw new AuthProviderError("exists");
+    u.pending = newEmail;
+    this.sentEmailChanges.push({ email: newEmail, link: `${redirectTo}#access_token=memec:${u.id}&type=email_change` });
   }
 }
 

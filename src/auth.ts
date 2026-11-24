@@ -20,13 +20,16 @@ export function verifyPassword(password: string, stored: string): boolean {
   return crypto.timingSafeEqual(actual, expected);
 }
 
-export async function createSession(res: Response, userId: number, organizationId: number): Promise<void> {
+/** Abre a sessão e guarda de onde ela veio (aparelho e IP), para a lista "Seus aparelhos" do perfil. */
+export async function createSession(res: Response, userId: number, organizationId: number, req?: Request): Promise<void> {
   const id = crypto.randomBytes(32).toString("hex");
-  await db.query("INSERT INTO sessions (id, user_id, organization_id, expires_at) VALUES ($1, $2, $3, $4)", [
+  await db.query("INSERT INTO sessions (id, user_id, organization_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5, $6)", [
     id,
     userId,
     organizationId,
     new Date(Date.now() + SESSION_TTL_MS),
+    req?.get("user-agent")?.slice(0, 300) ?? null,
+    req?.ip?.slice(0, 64) ?? null,
   ]);
   res.cookie(SESSION_COOKIE, id, {
     httpOnly: true,
@@ -132,10 +135,12 @@ export async function loadAuth(req: Request, res: Response, next: NextFunction):
        JOIN users u ON u.id = s.user_id
        JOIN organizations o ON o.id = s.organization_id
        JOIN organization_members m ON m.user_id = u.id AND m.organization_id = o.id
-       WHERE s.id = $1 AND s.expires_at > now()`,
+       WHERE s.id = $1 AND s.expires_at > now() AND u.deleted_at IS NULL`,
       [id],
     );
     if (row) {
+      // "Visto por último" sem escrever a cada requisição (no máximo a cada 5 minutos).
+      void db.query("UPDATE sessions SET last_seen_at = now() WHERE id = $1 AND last_seen_at < now() - interval '5 minutes'", [id]).catch(() => {});
       req.auth = {
         user: { id: row.user_id, name: row.user_name, email: row.email },
         organization: { id: row.organization_id, name: row.organization_name },

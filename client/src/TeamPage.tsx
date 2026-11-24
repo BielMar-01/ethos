@@ -84,6 +84,14 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
       await load()
     })
 
+  const resetMfa = async (m: Member) => {
+    if (!(await ask(`Desativar a verificação em duas etapas de ${m.name}? Ela entrará só com a senha e poderá configurar de novo. As outras sessões dela serão encerradas.`, { title: 'Redefinir 2FA', confirmLabel: 'Desativar 2FA', danger: true }))) return
+    return run(async () => {
+      await api.memberMfaReset(m.id)
+      setNotice(`Verificação em duas etapas de ${m.name} desativada.`)
+    })
+  }
+
   const remove = async (m: Member) => {
     if (!(await ask(`Remover ${m.name} da organização? Ele perde o acesso imediatamente.`))) return
     return run(async () => {
@@ -228,6 +236,7 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
                     <td className="row-actions">
                       <button onClick={() => setViewing(m)}>Ver</button>
                       <button onClick={() => setResetting(m)}>Redefinir senha</button>
+                      <button onClick={() => resetMfa(m)}>Redefinir 2FA</button>
                       {m.id !== currentUserId && (
                         <button className="danger" onClick={() => remove(m)}>
                           Remover

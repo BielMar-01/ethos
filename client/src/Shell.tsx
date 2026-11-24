@@ -185,7 +185,7 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
   const groups = staff ? STAFF_NAV : CLIENT_NAV
 
   let content
-  if (current === 'profile') content = <ProfilePage key={`pf-${orgKey}`} session={session} onSession={onSession} />
+  if (current === 'profile') content = <ProfilePage key={`pf-${orgKey}`} session={session} onSession={onSession} onLoggedOut={onLogout} />
   else if (current === 'notifications') content = <NotificationsPage key={`n-${orgKey}`} onOpenItem={openNotification} isStaff={staff} />
   else if (!staff) content = <PortalPage key={`p-${orgKey}-${portalTarget?.n ?? 0}`} role={session.role} initialTab={portalTarget?.tab} />
   else if (current === 'team' && isAdmin) content = <TeamPage key={`t-${orgKey}`} currentUserId={session.user.id} />
@@ -241,7 +241,9 @@ export default function Shell({ session, onLogout, onSession }: { session: Sessi
             aria-current={current === 'profile' ? 'page' : undefined}
             title={collapsed ? `${session.user.name} (${ROLE_LABELS[session.role]}) — Meu perfil` : 'Meu perfil'}
           >
-            <span className="avatar" aria-hidden="true">{initials(session.user.name)}</span>
+            <span className="avatar" aria-hidden="true">
+              {session.user.avatar_version ? <img src={`/api/profile/avatar?v=${session.user.avatar_version}`} alt="" /> : initials(session.user.name)}
+            </span>
             <span className="who">
               <strong>{session.user.name}</strong>
               <small>{ROLE_LABELS[session.role]} · Meu perfil</small>
