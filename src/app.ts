@@ -35,7 +35,7 @@ import { dashboardRouter } from "./dashboard.js";
 import { apiKeysRouter } from "./apikeys.js";
 import { buildOpenApi } from "./apiSpec.js";
 import { financeRouter } from "./finance.js";
-import { boletosRouter, tenantBoletosRouter } from "./boletos.js";
+import { boletosRouter, carneRouter, tenantBoletosRouter } from "./boletos.js";
 import { profileRouter } from "./profile.js";
 import { householdRouter } from "./household.js";
 import { household2Router } from "./household2.js";
@@ -437,6 +437,7 @@ export function createApp() {
   // ---------- Financeiro ----------
   app.use("/api", financeRouter);
   app.use("/api", boletosRouter);
+  app.use("/api", carneRouter);
   app.use("/api", lateFeesRouter);
   app.use("/api", bankRouter);
   app.use("/api", rateioRouter);

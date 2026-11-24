@@ -251,3 +251,44 @@ test.describe("operação e portaria", () => {
     await expect(page.getByRole("row").filter({ hasText: "Seguro incêndio E2E" }).first()).toBeVisible();
   });
 });
+
+test.describe("boleto manual em lote", () => {
+  test("carnê do contrato gera vários meses de uma vez e a baixa em lote dá baixa com recibo", async ({ page }) => {
+    await openPanel(page);
+    // Contrato próprio (não mexe nos dados do demo): unidade e locatário novos.
+    const tag = unique("Carnê");
+    const prop = (await (await page.request.post("/api/properties", { data: { name: tag, type: "apartamento" } })).json()).item;
+    const unit = (await (await page.request.post("/api/units", { data: { property_id: prop.id, identifier: "C1" } })).json()).item;
+    const tenantName = `Locatário ${tag}`;
+    const tenant = (await (await page.request.post("/api/tenants", { data: { name: tenantName, document: String(Math.floor(10_000_000_000 + Math.random() * 89_999_999_999)) } })).json()).item;
+    const lease = (await (await page.request.post("/api/leases", { data: { unit_id: unit.id, tenantIds: [tenant.id], start_date: "2031-01-01", end_date: "2032-12-31", rent_cents: 120000, due_day: 5 } })).json()).lease;
+    await page.request.post(`/api/leases/${lease.id}/status`, { data: { status: "vigente" } });
+
+    await goTo(page, "Financeiro");
+    await page.getByRole("tab", { name: "Boletos" }).click();
+    await page.getByRole("button", { name: "Carnê do contrato" }).click();
+    let dlg = page.getByRole("dialog");
+    const leaseOpt = dlg.getByRole("option", { name: new RegExp(tenantName) });
+    await dlg.getByLabel("Contrato").selectOption((await leaseOpt.getAttribute("value")) as string);
+    await dlg.getByLabel("Do mês").fill("2031-01");
+    await dlg.getByLabel("Até o mês").fill("2031-03");
+    await dlg.getByRole("button", { name: "Gerar carnê" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Gerar carnê" }).click();
+    await expect(dlg.getByText("Pronto: 3 boleto(s) criado(s)")).toBeVisible();
+    await dlg.locator(".actions").getByRole("button", { name: "Fechar" }).click();
+
+    await page.getByRole("button", { name: "Dar baixa em lote" }).click();
+    dlg = page.getByRole("dialog");
+    await dlg.getByLabel("O que baixar").selectOption("lease");
+    const opt = dlg.getByRole("option", { name: new RegExp(tenantName) });
+    await dlg.locator("select").nth(1).selectOption((await opt.getAttribute("value")) as string);
+    await expect(dlg.getByText("3 boleto(s) serão baixados")).toBeVisible();
+    await dlg.locator("select").nth(2).selectOption("date");
+    await dlg.getByLabel("Pago em").fill(new Date().toLocaleDateString("sv-SE"));
+    await dlg.getByRole("button", { name: "Dar baixa" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Dar baixa" }).click();
+    await expect(dlg.getByText("3 baixado(s), 3 recibo(s) emitido(s).")).toBeVisible();
+    const pays = (await (await page.request.get(`/api/payments`)).json()).items as { lease_id: number; method: string }[];
+    expect(pays.filter((p) => p.lease_id === lease.id && p.method === "boleto")).toHaveLength(3);
+  });
+});

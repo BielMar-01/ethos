@@ -6,6 +6,7 @@ import { brl, date } from './format'
 import { centsFromMoney, moneyFromCents } from './masks'
 import MaskedInput from './MaskedInput'
 import Modal from './Modal'
+import { BulkPayModal, CarneModal } from './CarneModals'
 
 /** Boletos: pelo Asaas (integrado) ou manuais (sem integração), individual e em lote; acompanhamento e cancelamento. */
 
@@ -449,6 +450,8 @@ export default function BoletosTab({ month, version, isAdmin, onChange, onError 
   const [loading, setLoading] = useState(true)
   const [viewing, setViewing] = useState<Boleto | null>(null)
   const [bulk, setBulk] = useState(false)
+  const [carne, setCarne] = useState(false)
+  const [bulkPay, setBulkPay] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [tick, setTick] = useState(0)
   const { info } = useBoletos(version + tick)
@@ -491,8 +494,13 @@ export default function BoletosTab({ month, version, isAdmin, onChange, onError 
         {info?.environment === 'sandbox' && <span className="badge">Ambiente de testes</span>}
         <span className="spacer" />
         {info?.connected && <button onClick={syncAll} disabled={syncing}>{syncing ? 'Atualizando…' : 'Atualizar situações'}</button>}
+        <button onClick={() => setBulkPay(true)}>Dar baixa em lote</button>
+        <button onClick={() => setCarne(true)}>Carnê do contrato</button>
         <button className="primary" onClick={() => setBulk(true)}>Emitir boletos do mês</button>
       </div>
+
+      {carne && <CarneModal onClose={() => setCarne(false)} onDone={reload} />}
+      {bulkPay && <BulkPayModal month={month} onClose={() => setBulkPay(false)} onDone={reload} />}
 
       {bulk && <BulkBoletoModal month={month} asaas={Boolean(info?.connected)} onClose={() => setBulk(false)} onDone={reload} />}
       {viewing && <BoletoDetail boleto={viewing} isAdmin={isAdmin} onClose={() => setViewing(null)} onChanged={reload} />}

@@ -3,7 +3,7 @@ import { Router } from "express";
 import { db } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 import { isRealDate, parseId } from "./crud.js";
-import { CHARGE_SELECT, brToday, monthRange, recordPayment } from "./finance.js";
+import { CHARGE_SELECT, brToday, generateRent, monthRange, recordPayment } from "./finance.js";
 import { notify, tenantUsersOfLease } from "./notifications.js";
 import { sendEmail } from "./mailer.js";
 import { SharedRateLimiter } from "./ratelimit.js";
@@ -337,7 +337,7 @@ boletosRouter.post("/boletos", async (req, res) => {
  * Até 100 por chamada; se houver mais, `remaining` diz quantas faltam (basta repetir).
  */
 /** Cobranças em aberto sem boleto aberto, escolhidas por `month` ou `charge_ids` (compartilhado pelo lote Asaas e manual). */
-async function bulkTargets(orgId: number, body: { month?: unknown; charge_ids?: unknown; kinds?: unknown }): Promise<{ error: string } | { todo: { id: number; description: string; unit_identifier: string }[] }> {
+async function bulkTargets(orgId: number, body: { month?: unknown; charge_ids?: unknown; kinds?: unknown; lease_id?: unknown; from?: unknown; to?: unknown }): Promise<{ error: string } | { todo: { id: number; description: string; unit_identifier: string }[] }> {
   const params: unknown[] = [orgId];
   let where = "c.organization_id = $1";
   if (Array.isArray(body.charge_ids)) {
@@ -346,9 +346,22 @@ async function bulkTargets(orgId: number, body: { month?: unknown; charge_ids?: 
     if (ids.length > 500) return { error: "Máximo de 500 cobranças por pedido" };
     params.push(ids);
     where += ` AND c.id = ANY($${params.length}::int[])`;
+  } else if (body.lease_id !== undefined) {
+    // Contrato inteiro (carnê): todas as cobranças em aberto do contrato, opcionalmente entre os meses from e to.
+    const leaseId = parseId(body.lease_id);
+    if (!leaseId) return { error: "lease_id inválido" };
+    params.push(leaseId);
+    where += ` AND c.lease_id = $${params.length}`;
+    if (body.from !== undefined || body.to !== undefined) {
+      const a = monthRange(body.from);
+      const z = monthRange(body.to);
+      if (!a || !z || a.start > z.start) return { error: "from e to devem ser meses (AAAA-MM), from até to" };
+      params.push(a.start, z.next);
+      where += ` AND c.due_date >= $${params.length - 1} AND c.due_date < $${params.length}`;
+    }
   } else {
     const r = monthRange(body.month);
-    if (!r) return { error: "Informe month (AAAA-MM) ou charge_ids" };
+    if (!r) return { error: "Informe month (AAAA-MM), lease_id ou charge_ids" };
     params.push(r.start, r.next);
     where += ` AND c.due_date >= $${params.length - 1} AND c.due_date < $${params.length}`;
   }
@@ -478,48 +491,165 @@ boletosRouter.patch("/boletos/:id", async (req, res) => {
 });
 
 /** Marca um boleto manual como pago (informação da equipe). A baixa da cobrança continua em Pagamentos. */
-boletosRouter.post("/boletos/:id/paid", async (req, res) => {
-  const orgId = req.auth!.organization.id;
-  try {
-    const b = await manualBoleto(orgId, req.params.id);
-    if (!b) return void res.status(404).json({ error: "Não encontrado" });
-    if (b.status === "paga") return void res.status(409).json({ error: "Este boleto já está marcado como pago." });
-    if (b.status === "cancelada") return void res.status(409).json({ error: "Este boleto está cancelado." });
-    const raw = req.body?.paid_at;
-    const paidAt = raw === undefined || raw === null || raw === "" ? brToday() : String(raw);
-    if (!isRealDate(paidAt) || paidAt > brToday()) return void res.status(400).json({ error: "A data do pagamento deve ser uma data válida que não esteja no futuro." });
-    await db.query("UPDATE boletos SET status = 'paga', paid_at = $1, updated_at = now() WHERE id = $2", [paidAt, b.id]);
-    // Opcional: já registra o pagamento (recibo + baixa) pelo valor do boleto, limitado ao saldo da cobrança.
-    let payment: { id: number; receipt_number: number } | null = null;
-    let paymentError: string | null = null;
-    if (req.body?.register_payment === true) {
-      const [row] = await db.query<{ lease_id: number; left: number; amount_cents: number }>(
-        `SELECT x.lease_id, (x.amount_cents - x.paid_cents) AS "left", b.amount_cents
-         FROM boletos b JOIN (${CHARGE_SELECT} WHERE c.organization_id = $1) x ON x.id = b.charge_id WHERE b.id = $2`,
-        [orgId, b.id],
-      );
-      const value = row ? Math.min(row.left, row.amount_cents) : 0;
-      if (!row || value < 1) paymentError = "A cobrança já está quitada: nenhum pagamento foi registrado.";
-      else {
-        const out = await recordPayment(orgId, req.auth!.user.id, {
-          leaseId: row.lease_id, receivedAt: paidAt, amountCents: value, method: "boleto", reference: `Boleto #${b.id}`,
-          allocations: [{ chargeId: b.charge_id, amount: value }],
-        });
-        if (out.code === 201) {
-          payment = out.payment;
-          await db.query("UPDATE boletos SET payment_id = $1 WHERE id = $2", [out.payment.id, b.id]);
-        } else paymentError = out.error;
-      }
+type Actor = { id: number; name: string; role: string };
+interface Settled { code: number; error?: string; item?: unknown; payment?: { id: number; receipt_number: number } | null; payment_error?: string | null }
+
+/** Marca UM boleto manual como pago e, se pedido, registra o pagamento (recibo + baixa). Usado pela baixa individual e pela em lote. */
+async function settleManual(orgId: number, actor: Actor, rawId: unknown, opts: { paidAt?: unknown; useDueDate?: boolean; registerPayment?: boolean }): Promise<Settled> {
+  const b = await manualBoleto(orgId, rawId);
+  if (!b) return { code: 404, error: "Não encontrado" };
+  if (b.status === "paga") return { code: 409, error: "Este boleto já está marcado como pago." };
+  if (b.status === "cancelada") return { code: 409, error: "Este boleto está cancelado." };
+  const today = brToday();
+  let paidAt = opts.paidAt === undefined || opts.paidAt === null || opts.paidAt === "" ? today : String(opts.paidAt);
+  if (opts.useDueDate) {
+    // Cada boleto baixa na própria data de vencimento (nunca no futuro): útil para lançar um mês inteiro já recebido em dia.
+    const [row] = await db.query<{ due: string }>("SELECT to_char(due_date, 'YYYY-MM-DD') AS due FROM boletos WHERE id = $1", [b.id]);
+    paidAt = row!.due > today ? today : row!.due;
+  }
+  if (!isRealDate(paidAt) || paidAt > today) return { code: 400, error: "A data do pagamento deve ser uma data válida que não esteja no futuro." };
+  await db.query("UPDATE boletos SET status = 'paga', paid_at = $1, updated_at = now() WHERE id = $2", [paidAt, b.id]);
+  let payment: { id: number; receipt_number: number } | null = null;
+  let paymentError: string | null = null;
+  if (opts.registerPayment === true) {
+    const [row] = await db.query<{ lease_id: number; left: number; amount_cents: number }>(
+      `SELECT x.lease_id, (x.amount_cents - x.paid_cents) AS "left", b.amount_cents
+       FROM boletos b JOIN (${CHARGE_SELECT} WHERE c.organization_id = $1) x ON x.id = b.charge_id WHERE b.id = $2`,
+      [orgId, b.id],
+    );
+    const value = row ? Math.min(row.left, row.amount_cents) : 0;
+    if (!row || value < 1) paymentError = "A cobrança já está quitada: nenhum pagamento foi registrado.";
+    else {
+      const out = await recordPayment(orgId, actor.id, {
+        leaseId: row.lease_id, receivedAt: paidAt, amountCents: value, method: "boleto", reference: `Boleto #${b.id}`,
+        allocations: [{ chargeId: b.charge_id, amount: value }],
+      });
+      if (out.code === 201) {
+        payment = out.payment;
+        await db.query("UPDATE boletos SET payment_id = $1 WHERE id = $2", [out.payment.id, b.id]);
+      } else paymentError = out.error;
     }
-    emitWebhook({
-      organizationId: orgId, event: "boleto.paid", actor: { id: req.auth!.user.id, name: req.auth!.user.name, role: req.auth!.role },
-      entity: "boletos", entityId: b.id, summary: "Boleto marcado como pago", data: { boleto_id: b.id, charge_id: b.charge_id, paid_at: paidAt },
-    });
-    const [item] = await db.query(`${BOLETO_SELECT} WHERE b.id = $1`, [b.id]);
-    res.json({ item, payment, payment_error: paymentError });
+  }
+  emitWebhook({
+    organizationId: orgId, event: "boleto.paid", actor: { id: actor.id, name: actor.name, role: actor.role },
+    entity: "boletos", entityId: b.id, summary: "Boleto marcado como pago", data: { boleto_id: b.id, charge_id: b.charge_id, paid_at: paidAt },
+  });
+  const [item] = await db.query(`${BOLETO_SELECT} WHERE b.id = $1`, [b.id]);
+  return { code: 200, item, payment, payment_error: paymentError };
+}
+
+/** Marca um boleto manual como pago (informação da equipe), com a opção de já registrar o pagamento. */
+boletosRouter.post("/boletos/:id/paid", async (req, res) => {
+  try {
+    const r = await settleManual(req.auth!.organization.id, { id: req.auth!.user.id, name: req.auth!.user.name, role: req.auth!.role }, req.params.id, { paidAt: req.body?.paid_at, registerPayment: req.body?.register_payment === true });
+    if (r.code !== 200) return void res.status(r.code).json({ error: r.error });
+    res.json({ item: r.item, payment: r.payment, payment_error: r.payment_error });
   } catch (err) {
     fail(res, err);
   }
+});
+
+/**
+ * Baixa em LOTE de boletos manuais em aberto: por `boleto_ids`, por `month` (vencimento) ou por `lease_id` (contrato, com from/to opcionais).
+ * `paid_at` único, ou `use_due_date` para cada um baixar no próprio vencimento. `register_payment` emite o recibo e dá a baixa na cobrança.
+ * Até 100 por chamada; falha de um não impede os outros.
+ */
+boletosRouter.post("/boletos/paid-bulk", async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  let ids: number[];
+  if (Array.isArray(b.boleto_ids)) {
+    ids = [...new Set(b.boleto_ids.map(parseId).filter((n): n is number => n !== undefined))];
+    if (ids.length === 0) return void res.status(400).json({ error: "boleto_ids vazio ou inválido" });
+  } else {
+    const params: unknown[] = [orgId];
+    let where = "b.organization_id = $1";
+    if (b.lease_id !== undefined) {
+      const leaseId = parseId(b.lease_id);
+      if (!leaseId) return void res.status(400).json({ error: "lease_id inválido" });
+      params.push(leaseId);
+      where += ` AND c.lease_id = $${params.length}`;
+    }
+    if (b.month !== undefined) {
+      const r = monthRange(b.month);
+      if (!r) return void res.status(400).json({ error: "month deve ser AAAA-MM" });
+      params.push(r.start, r.next);
+      where += ` AND b.due_date >= $${params.length - 1} AND b.due_date < $${params.length}`;
+    }
+    if (b.lease_id === undefined && b.month === undefined) return void res.status(400).json({ error: "Informe boleto_ids, month ou lease_id" });
+    ids = (await db.query<{ id: number }>(
+      `SELECT b.id FROM boletos b JOIN charges c ON c.id = b.charge_id
+       WHERE ${where} AND b.provider = 'manual' AND b.status = 'pendente' ORDER BY b.due_date, b.id`,
+      params,
+    )).map((r) => r.id);
+  }
+  if (b.dry_run === true) {
+    // Só mostra o que seria baixado (para a tela confirmar antes).
+    const items = ids.length ? await db.query(`${BOLETO_SELECT} WHERE b.id = ANY($1::int[]) AND b.organization_id = $2 AND b.provider = 'manual' AND b.status IN ('pendente','vencida') ORDER BY b.due_date, b.id`, [ids.slice(0, BULK_MAX), orgId]) : [];
+    return void res.json({ eligible: items.length, items, remaining: Math.max(0, ids.length - BULK_MAX) });
+  }
+  const batch = ids.slice(0, BULK_MAX);
+  const actor = { id: req.auth!.user.id, name: req.auth!.user.name, role: req.auth!.role };
+  let paid = 0;
+  let payments = 0;
+  const failed: { boleto_id: number; error: string }[] = [];
+  const notes: { boleto_id: number; note: string }[] = [];
+  for (const id of batch) {
+    try {
+      const r = await settleManual(orgId, actor, id, { paidAt: b.paid_at, useDueDate: b.use_due_date === true, registerPayment: b.register_payment === true });
+      if (r.code !== 200) { failed.push({ boleto_id: id, error: r.error ?? "erro" }); continue; }
+      paid++;
+      if (r.payment) payments++;
+      if (r.payment_error) notes.push({ boleto_id: id, note: r.payment_error });
+    } catch (err) {
+      if (!(err instanceof BoletoError)) throw err;
+      failed.push({ boleto_id: id, error: err.message });
+    }
+  }
+  res.json({ eligible: ids.length, paid, payments, failed, notes, remaining: ids.length - batch.length });
+});
+
+/**
+ * Carnê do contrato: gera de uma vez os aluguéis dos meses de `from` a `to` (se `generate_charges` não for false) e um boleto
+ * manual para cada cobrança em aberto desse contrato nesse período. Idempotente: não duplica cobrança nem boleto.
+ */
+export const carneRouter = Router();
+carneRouter.post("/leases/:id/carne", requireAuth, requireRole("admin", "colaborador"), async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  const leaseId = parseId(req.params.id);
+  const a = monthRange(req.body?.from);
+  const z = monthRange(req.body?.to);
+  if (!leaseId || !a || !z || a.start > z.start) return void res.status(400).json({ error: "Informe from e to (AAAA-MM), do primeiro ao último mês do carnê." });
+  const months: string[] = [];
+  for (let y = Number(a.start.slice(0, 4)), m = Number(a.start.slice(5, 7)); ; ) {
+    const key = `${y}-${String(m).padStart(2, "0")}`;
+    months.push(key);
+    if (key >= String(req.body.to) || months.length > 36) break;
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  if (months.length > 36) return void res.status(400).json({ error: "O carnê vai até 36 meses por vez." });
+  const [lease] = await db.query<{ status: string }>("SELECT status FROM leases WHERE id = $1 AND organization_id = $2", [leaseId, orgId]);
+  if (!lease) return void res.status(404).json({ error: "Contrato não encontrado." });
+  if (lease.status !== "vigente") return void res.status(409).json({ error: "O carnê só é gerado para contrato vigente." });
+  let chargesCreated = 0;
+  if (req.body?.generate_charges !== false) {
+    for (const m of months) chargesCreated += (await generateRent(orgId, req.auth!.user.id, m, leaseId))?.created ?? 0;
+  }
+  const t = await bulkTargets(orgId, { lease_id: leaseId, from: req.body.from, to: req.body.to });
+  if ("error" in t) return void res.status(400).json({ error: t.error });
+  let created = 0;
+  const failed: { charge_id: number; label: string; error: string }[] = [];
+  for (const c of t.todo.slice(0, BULK_MAX)) {
+    try {
+      await issueManual(orgId, req.auth!.user.id, c.id);
+      created++;
+    } catch (err) {
+      if (!(err instanceof BoletoError)) throw err;
+      failed.push({ charge_id: c.id, label: c.description, error: err.message });
+    }
+  }
+  res.json({ months: months.length, charges_created: chargesCreated, boletos_created: created, failed, remaining: Math.max(0, t.todo.length - BULK_MAX) });
 });
 
 const resendLimiter = new SharedRateLimiter("boleto-resend", 5, 60 * 60 * 1000);

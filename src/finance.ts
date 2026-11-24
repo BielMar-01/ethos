@@ -113,17 +113,14 @@ financeRouter.get("/charges", async (req, res) => {
 });
 
 /** Gera o aluguel do mês para todos os contratos vigentes no período (idempotente). */
-financeRouter.post("/charges/generate", async (req, res) => {
-  const orgId = req.auth!.organization.id;
-  const range = monthRange(req.body?.month);
-  if (!range) {
-    res.status(400).json({ error: "month deve ser AAAA-MM" });
-    return;
-  }
+/** Gera o aluguel do mês (opcionalmente de um só contrato). Idempotente. Devolve null se o mês é inválido. */
+export async function generateRent(orgId: number, userId: number, month: unknown, leaseId?: number): Promise<{ eligible: number; created: number; skipped: number } | null> {
+  const range = monthRange(month);
+  if (!range) return null;
   const leases = await db.query<{ id: number; rent_cents: number; due_day: number; start_date: string; end_date: string }>(
     `SELECT id, rent_cents, due_day, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date FROM leases
-     WHERE organization_id = $1 AND status = 'vigente' AND start_date < $3 AND end_date >= $2`,
-    [orgId, range.start, range.next],
+     WHERE organization_id = $1 AND status = 'vigente' AND start_date < $3 AND end_date >= $2 AND ($4::int IS NULL OR id = $4)`,
+    [orgId, range.start, range.next, leaseId ?? null],
   );
   const [cfg] = await db.query<{ prorata_enabled: boolean }>("SELECT prorata_enabled FROM organizations WHERE id = $1", [orgId]);
   const label = `${range.start.slice(5, 7)}/${range.start.slice(0, 4)}`;
@@ -149,12 +146,21 @@ financeRouter.post("/charges/generate", async (req, res) => {
          VALUES ($1, $2, 'aluguel', $3, $4, $5, $6, $7)
          ON CONFLICT (lease_id, competence) WHERE kind = 'aluguel' AND cancelled_at IS NULL DO NOTHING
          RETURNING id`,
-        [orgId, l.id, description, range.start, due, amount, req.auth!.user.id],
+        [orgId, l.id, description, range.start, due, amount, userId],
       );
       created += r.length;
     }
   });
-  res.json({ month: req.body.month, eligible: leases.length, created, skipped: leases.length - created });
+  return { eligible: leases.length, created, skipped: leases.length - created };
+}
+
+financeRouter.post("/charges/generate", async (req, res) => {
+  const out = await generateRent(req.auth!.organization.id, req.auth!.user.id, req.body?.month);
+  if (!out) {
+    res.status(400).json({ error: "month deve ser AAAA-MM" });
+    return;
+  }
+  res.json({ month: req.body.month, ...out });
 });
 
 /** Cobrança avulsa (multa, juros, taxa…). */

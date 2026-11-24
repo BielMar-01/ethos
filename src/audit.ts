@@ -109,6 +109,8 @@ const rules: Rule[] = [
   { method: "PATCH", path: /^\/api\/boletos\/:id$/, kind: "update", summary: "Alterou boleto manual" },
   { method: "POST", path: /^\/api\/boletos\/:id\/paid$/, kind: "action", summary: "Marcou boleto como pago" },
   { method: "POST", path: /^\/api\/boletos\/bulk$/, kind: "action", summary: "Emitiu boletos em lote", event: "boletos.generated" },
+  { method: "POST", path: /^\/api\/boletos\/paid-bulk$/, kind: "action", summary: "Deu baixa em boletos em lote", event: "boletos.paid" },
+  { method: "POST", path: /^\/api\/leases\/:id\/carne$/, kind: "action", summary: "Gerou o carnê do contrato", event: "boletos.generated" },
   { method: "POST", path: /^\/api\/boletos\/:id\/resend$/, kind: "action", summary: "Reenviou a segunda via do boleto" },
   { method: "POST", path: /^\/api\/boletos\/sync$/, kind: "action", summary: "Atualizou a situação dos boletos" },
   { method: "POST", path: /^\/api\/boletos\/:id\/sync$/, kind: "action", summary: "Atualizou a situação de um boleto" },
