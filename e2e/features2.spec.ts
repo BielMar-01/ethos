@@ -282,13 +282,16 @@ test.describe("boleto manual em lote", () => {
     await dlg.getByLabel("O que baixar").selectOption("lease");
     const opt = dlg.getByRole("option", { name: new RegExp(tenantName) });
     await dlg.locator("select").nth(1).selectOption((await opt.getAttribute("value")) as string);
-    await expect(dlg.getByText("3 boleto(s) serão baixados")).toBeVisible();
+    await expect(dlg.getByText(/3 de 3 boleto\(s\) marcado\(s\)/)).toBeVisible();
+    // Escolhe quais baixar: desmarca o primeiro.
+    await dlg.getByRole("checkbox", { name: /^Baixar/ }).first().uncheck();
+    await expect(dlg.getByText(/2 de 3 boleto\(s\) marcado\(s\)/)).toBeVisible();
     await dlg.locator("select").nth(2).selectOption("date");
     await dlg.getByLabel("Pago em").fill(new Date().toLocaleDateString("sv-SE"));
     await dlg.getByRole("button", { name: "Dar baixa" }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Dar baixa" }).click();
-    await expect(dlg.getByText("3 baixado(s), 3 recibo(s) emitido(s).")).toBeVisible();
+    await expect(dlg.getByText("2 baixado(s), 2 recibo(s) emitido(s).")).toBeVisible();
     const pays = (await (await page.request.get(`/api/payments`)).json()).items as { lease_id: number; method: string }[];
-    expect(pays.filter((p) => p.lease_id === lease.id && p.method === "boleto")).toHaveLength(3);
+    expect(pays.filter((p) => p.lease_id === lease.id && p.method === "boleto")).toHaveLength(2);
   });
 });

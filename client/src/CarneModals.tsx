@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { request } from './api'
 import { Alert, ask, errorText, toast } from './feedback'
 import { Loaded, Table, dateOnly, json, money, useLoad } from './kit'
@@ -90,18 +90,29 @@ export function BulkPayModal({ month, onClose, onDone }: { month: string; onClos
   const target = scope === 'month' ? { month } : { lease_id: Number(leaseId) }
   const ready = scope === 'month' || Boolean(leaseId)
   const preview = useLoad(() => (ready ? request<{ eligible: number; items: Open[]; remaining: number }>('/api/boletos/paid-bulk', json('POST', { ...target, dry_run: true })) : Promise.resolve({ eligible: 0, items: [] as Open[], remaining: 0 })), [scope, leaseId, month])
+  // Quais boletos da lista serão baixados (todos marcados por padrão; desmarque os que não).
+  const [picked, setPicked] = useState<Set<number>>(new Set())
+  useEffect(() => {
+    setPicked(new Set(preview.data?.items.map((i) => i.id) ?? []))
+  }, [preview.data])
+  const toggle = (id: number) => setPicked((cur) => {
+    const next = new Set(cur)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<null | { paid: number; payments: number; failed: { boleto_id: number; error: string }[]; notes: { note: string }[]; remaining: number }>(null)
 
   async function run() {
-    const n = preview.data?.eligible ?? 0
+    const n = picked.size
     const msg = `Dar baixa em ${n} boleto(s)?${register ? ' Será emitido um recibo e dada a baixa em cada cobrança.' : ' Só os boletos serão marcados como pagos; as cobranças continuam em aberto até você registrar o recebimento.'} Isso não pode ser desfeito em lote (estorne pelo pagamento, se precisar).`
     if (!(await ask(msg, { title: 'Baixa em lote', confirmLabel: 'Dar baixa' }))) return
     setBusy(true)
     setError('')
     try {
-      setResult(await request('/api/boletos/paid-bulk', json('POST', { ...target, use_due_date: mode === 'due', paid_at: mode === 'date' ? paidAt : undefined, register_payment: register })))
+      setResult(await request('/api/boletos/paid-bulk', json('POST', { boleto_ids: [...picked], use_due_date: mode === 'due', paid_at: mode === 'date' ? paidAt : undefined, register_payment: register })))
       toast.success('Baixa em lote concluída.')
       onDone()
       await preview.reload()
@@ -148,8 +159,13 @@ export function BulkPayModal({ month, onClose, onDone }: { month: string; onClos
           <Loaded state={preview}>
             {(d) => (
               <>
-                <p><strong>{d.eligible}</strong> boleto(s) serão baixados{d.remaining > 0 ? ` (mais ${d.remaining} ficam para a próxima rodada; máx. 100 por vez)` : ''}.</p>
+                <div className="inline">
+                  <p style={{ flex: 1, margin: 0 }}><strong>{picked.size}</strong> de {d.eligible} boleto(s) marcado(s) para baixa{d.remaining > 0 ? ` (mais ${d.remaining} ficam para a próxima rodada; máx. 100 por vez)` : ''}.</p>
+                  <button type="button" onClick={() => setPicked(new Set(d.items.map((i) => i.id)))}>Marcar todos</button>
+                  <button type="button" onClick={() => setPicked(new Set())}>Desmarcar todos</button>
+                </div>
                 <Table rows={d.items} empty="Nenhum boleto manual em aberto neste filtro." cols={[
+                  { head: '', cell: (b) => <input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} aria-label={`Baixar ${b.description} de ${b.tenant_names ?? 'sem locatário'}`} /> },
                   { head: 'Locatário', cell: (b) => b.tenant_names },
                   { head: 'Unidade', cell: (b) => b.unit_identifier },
                   { head: 'Cobrança', cell: (b) => b.description },
@@ -170,7 +186,7 @@ export function BulkPayModal({ month, onClose, onDone }: { month: string; onClos
         )}
         <div className="actions">
           <button onClick={onClose}>Fechar</button>
-          <button className="primary" disabled={busy || !ready || !(preview.data?.eligible ?? 0)} onClick={run}>{busy ? 'Baixando…' : 'Dar baixa'}</button>
+          <button className="primary" disabled={busy || !ready || picked.size === 0} onClick={run}>{busy ? 'Baixando…' : `Dar baixa em ${picked.size}`}</button>
         </div>
       </div>
     </Modal>
