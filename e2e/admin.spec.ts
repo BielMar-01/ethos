@@ -63,7 +63,7 @@ test.describe("equipe: redefinir senha pela tela", () => {
     await menu(page).getByRole("button", { name: "Equipe", exact: true }).click();
     const email = `conv-${Date.now().toString(36)}@e2e.test`;
     await page.getByRole("button", { name: "Convidar pessoa" }).click();
-    await page.getByRole("dialog").getByLabel("E-mail").fill(email);
+    await page.getByRole("dialog").getByLabel("E-mail", { exact: true }).fill(email);
     await page.getByRole("dialog").getByRole("button", { name: "Gerar convite" }).click();
     const link = await page.locator("input[readonly], .link-box code, .link-box input").first().inputValue().catch(async () => (await page.locator(".link-box").innerText()));
     expect(link).toContain("invite=");
@@ -71,7 +71,9 @@ test.describe("equipe: redefinir senha pela tela", () => {
     const guest = await ctx.newPage();
     await guest.goto(link.match(/https?:\/\/\S+invite=\S+/)![0]);
     await guest.getByLabel("Seu nome").fill("Convidado E2E");
-    await guest.locator('input[autocomplete$="-password"]').fill("senha-convidado-1");
+    await expect(guest.getByLabel("E-mail", { exact: true })).toHaveValue(email);
+    await expect(guest.getByLabel("E-mail", { exact: true })).toHaveAttribute("readonly", "");
+    for (const f of await guest.locator('input[autocomplete$="-password"]').all()) await f.fill("senha-convidado-1");
     await guest.getByRole("button", { name: /Criar conta|Entrar|Aceitar/ }).click();
     await expect(guest.locator(".topbar")).toBeVisible();
     await ctx.close();

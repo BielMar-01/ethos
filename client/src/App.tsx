@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { api, type InviteInfo, type Session } from './api'
+import { api, ROLE_LABELS, type InviteInfo, type Session } from './api'
 import Icon from './Icon'
 import PasswordInput from './PasswordInput'
 import LandingPage, { PublicLayout } from './LandingPage'
@@ -356,6 +356,7 @@ function AcceptInvite({ token, onAuth, onCancel }: { token: string; onAuth: (s: 
   const [invalid, setInvalid] = useState(false)
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -365,8 +366,9 @@ function AcceptInvite({ token, onAuth, onCancel }: { token: string; onAuth: (s: 
 
   async function submit(e: FormEvent) {
     e.preventDefault()
-    setBusy(true)
     setError('')
+    if (info && !info.existingAccount && password !== confirm) return setError('As senhas não conferem.')
+    setBusy(true)
     try {
       onAuth(await api.acceptInvite(token, name, password))
     } catch (err) {
@@ -391,15 +393,19 @@ function AcceptInvite({ token, onAuth, onCancel }: { token: string; onAuth: (s: 
   return (
     <Page title={`Convite para ${info.organizationName}`} onSubmit={submit}>
       <p className="muted">
-        Entrando como <strong>{info.email}</strong>.{' '}
+        {info.inviterName ? <><strong>{info.inviterName}</strong> convidou você</> : 'Você foi convidado(a)'} para acessar <strong>{info.organizationName}</strong> como <strong>{ROLE_LABELS[info.role]}</strong>.{' '}
         {info.existingAccount
           ? 'Você já tem conta: confirme com a sua senha atual.'
           : 'Crie seu acesso para continuar.'}
       </p>
+      <label>
+        E-mail
+        <input type="email" value={info.email} readOnly aria-readonly="true" autoComplete="username" />
+      </label>
       {!info.existingAccount && (
         <label>
           Seu nome
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
+          <input value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" />
         </label>
       )}
       <label>
@@ -412,6 +418,12 @@ function AcceptInvite({ token, onAuth, onCancel }: { token: string; onAuth: (s: 
           required
         />
       </label>
+      {!info.existingAccount && (
+        <label>
+          Repita a senha
+          <PasswordInput minLength={8} autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+        </label>
+      )}
       {error && <Alert>{error}</Alert>}
       <button type="submit" className="primary" disabled={busy}>
         Aceitar convite

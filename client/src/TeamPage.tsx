@@ -23,6 +23,15 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
   const [tenants, setTenants] = useState<Item[]>([])
   const [owners, setOwners] = useState<Item[]>([])
   const [linkId, setLinkId] = useState('')
+  const [sendMail, setSendMail] = useState(true)
+
+  const resend = (i: Invitation, withEmail: boolean) =>
+    run(async () => {
+      const r = await api.resendInvitation(i.id, withEmail)
+      setLink({ label: `Novo link de convite para ${i.email}`, url: r.link })
+      setNotice(withEmail ? (r.email_sent ? `E-mail reenviado para ${i.email}. O link anterior deixou de valer.` : 'Não foi possível enviar o e-mail. Copie o novo link.') : 'Novo link gerado. O link anterior deixou de valer.')
+      await load()
+    })
 
   const load = useCallback(async () => {
     try {
@@ -57,8 +66,9 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
     return run(async () => {
       const linkBody =
         role === 'inquilino' ? { tenantId: Number(linkId) } : role === 'proprietario' ? { ownerId: Number(linkId) } : undefined
-      const r = await api.createInvitation(email, role, linkBody)
+      const r = await api.createInvitation(email, role, linkBody, sendMail)
       setLink({ label: `Convite para ${r.invitation.email}`, url: r.link })
+      setNotice(r.email_sent ? `E-mail enviado para ${r.invitation.email}.` : sendMail ? 'Não foi possível enviar o e-mail (envio não configurado ou falhou). Copie o link e envie você mesmo.' : '')
       setEmail('')
       setLinkId('')
       setInviting(false)
@@ -206,6 +216,10 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
             ? 'Clientes acessam a área do cliente e enxergam apenas os dados ligados a este cadastro.'
             : 'Administradores e colaboradores acessam o painel da organização.'}
         </p>
+        <label className="check span-all">
+          <input type="checkbox" checked={sendMail} onChange={(e) => setSendMail(e.target.checked)} /> Enviar o convite por e-mail agora
+        </label>
+        <p className="muted small span-all">O link para copiar aparece de qualquer forma. Ele abre a tela de cadastro com o e-mail da pessoa já preenchido.</p>
         <div className="actions">
           <button type="submit" className="primary">
             Gerar convite
@@ -293,6 +307,8 @@ export default function TeamPage({ currentUserId }: { currentUserId: number }) {
                       <td>{ROLE_LABELS[i.role]}</td>
                       <td>{new Date(i.expires_at).toLocaleDateString('pt-BR')}</td>
                       <td className="row-actions">
+                        <button onClick={() => resend(i, true)} aria-label={`Reenviar e-mail do convite para ${i.email}`}>Reenviar e-mail</button>
+                        <button onClick={() => resend(i, false)} aria-label={`Gerar novo link do convite para ${i.email}`}>Novo link</button>
                         <button className="danger" onClick={() => revoke(i)}>
                           Revogar
                         </button>

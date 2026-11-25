@@ -226,6 +226,7 @@ const rules: Rule[] = [
   { method: "POST", path: /^\/api\/members\/:id\/password-reset$/, kind: "action", summary: "Redefiniu a senha de um membro" },
   { method: "POST", path: /^\/api\/invitations\/by-token\/:token\/accept$/, kind: "auth", summary: "Aceitou um convite" },
   { method: "POST", path: /^\/api\/invitations$/, kind: "create", summary: "Criou convite" },
+  { method: "POST", path: /^\/api\/invitations\/:id\/resend$/, kind: "action", summary: "Reenviou convite" },
   { method: "DELETE", path: /^\/api\/invitations\/:id$/, kind: "delete", summary: "Cancelou convite" },
   { method: "PATCH", path: /^\/api\/members\/:id$/, kind: "update", summary: "Alterou o papel de um membro" },
   { method: "DELETE", path: /^\/api\/members\/:id$/, kind: "delete", summary: "Removeu um membro da equipe" },

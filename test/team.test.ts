@@ -32,10 +32,12 @@ describe("convites", () => {
     assert.ok(link.startsWith("http://app.test/?invite="));
 
     const info = await new Client(base).call("GET", `/api/invitations/by-token/${token}`);
-    assert.deepEqual(info.body, {
+    assert.equal(typeof info.body.inviterName, "string");
+    assert.deepEqual({ ...info.body, inviterName: undefined }, {
       email: "novo@x.com",
       role: "colaborador",
       organizationName: "Inv",
+      inviterName: undefined,
       existingAccount: false,
     });
 
@@ -48,6 +50,45 @@ describe("convites", () => {
     // O novo usuário consegue entrar depois com a senha escolhida.
     const login = await new Client(base).call("POST", "/api/auth/login", { email: "novo@x.com", password: PASSWORD });
     assert.equal(login.status, 200);
+  });
+
+  it("manda o convite por e-mail (com o link), reenvia com link novo e deixa desligar o envio", async () => {
+    const { memoryMailer } = await import("../src/mailer.js");
+    const admin = await register(base, "mail-admin@x.com", "Mail Org");
+    const mails = (to: string) => memoryMailer.outbox.filter((m) => m.to === to);
+
+    const r = await admin.call("POST", "/api/invitations", { email: "pessoa@x.com", role: "colaborador" });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.email_sent, true);
+    assert.equal(mails("pessoa@x.com").length, 1);
+    assert.ok(mails("pessoa@x.com")[0]!.text.includes(r.body.link), "o e-mail leva o mesmo link");
+    assert.ok(mails("pessoa@x.com")[0]!.subject.includes("Mail Org"));
+
+    // Sem envio: só o link.
+    const quiet = await admin.call("POST", "/api/invitations", { email: "quieta@x.com", role: "colaborador", send_email: false });
+    assert.deepEqual([quiet.status, quiet.body.email_sent, mails("quieta@x.com").length], [201, false, 0]);
+
+    // Reenviar: link novo, o antigo morre, e-mail novo.
+    const old = tokenFrom(r.body.link);
+    const again = await admin.call("POST", `/api/invitations/${r.body.invitation.id}/resend`, {});
+    assert.equal(again.status, 200);
+    assert.equal(again.body.email_sent, true);
+    assert.equal(mails("pessoa@x.com").length, 2);
+    assert.notEqual(tokenFrom(again.body.link), old);
+    assert.equal((await new Client(base).call("GET", `/api/invitations/by-token/${old}`)).status, 404, "link antigo deixa de valer");
+    const info = await new Client(base).call("GET", `/api/invitations/by-token/${tokenFrom(again.body.link)}`);
+    assert.equal(info.body.email, "pessoa@x.com", "o link novo abre o cadastro com o e-mail da pessoa");
+
+    const copy = await admin.call("POST", `/api/invitations/${r.body.invitation.id}/resend`, { send_email: false });
+    assert.deepEqual([copy.status, copy.body.email_sent, mails("pessoa@x.com").length], [200, false, 2]);
+
+    // Só admin e só da própria organização; aceito não reenvia.
+    const other = await register(base, "mail-other@x.com", "Outra");
+    assert.equal((await other.call("POST", `/api/invitations/${r.body.invitation.id}/resend`, {})).status, 404);
+    assert.equal((await new Client(base).call("POST", `/api/invitations/${r.body.invitation.id}/resend`, {})).status, 401);
+    const accepted = await accept(tokenFrom(copy.body.link), "Pessoa");
+    assert.equal(accepted.status, 201);
+    assert.equal((await admin.call("POST", `/api/invitations/${r.body.invitation.id}/resend`, {})).status, 404);
   });
 
   it("só admin cria, lista e revoga convites", async () => {

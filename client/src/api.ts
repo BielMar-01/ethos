@@ -135,6 +135,7 @@ export interface InviteInfo {
   email: string
   role: Role
   organizationName: string
+  inviterName?: string | null
   existingAccount: boolean
 }
 
@@ -436,8 +437,10 @@ export const api = {
     request<{ sent?: boolean; link?: string; changed?: boolean; password?: string }>(`/api/members/${id}/password-reset`, json('POST', { mode, password })),
   memberMfaReset: (id: number) => request<void>(`/api/members/${id}/mfa-reset`, { method: 'POST' }),
   invitations: () => request<{ invitations: Invitation[] }>('/api/invitations'),
-  createInvitation: (email: string, role: Role, link?: { tenantId?: number; ownerId?: number }) =>
-    request<{ invitation: Invitation; link: string }>('/api/invitations', json('POST', { email, role, ...link })),
+  createInvitation: (email: string, role: Role, link?: { tenantId?: number; ownerId?: number }, sendEmail = true) =>
+    request<{ invitation: Invitation; link: string; email_sent: boolean }>('/api/invitations', json('POST', { email, role, send_email: sendEmail, ...link })),
+  resendInvitation: (id: number, sendEmail: boolean) =>
+    request<{ invitation: Invitation; link: string; email_sent: boolean }>(`/api/invitations/${id}/resend`, json('POST', { send_email: sendEmail })),
   revokeInvitation: (id: number) => request<void>(`/api/invitations/${id}`, { method: 'DELETE' }),
   list: (resource: string) => request<{ items: Item[] }>(`/api/${resource}`),
   create: (resource: string, body: Record<string, unknown>) =>

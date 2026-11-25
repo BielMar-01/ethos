@@ -6,6 +6,7 @@ import { AuthProviderError, appUrl, getAuthProvider } from "./authProvider.js";
 import { parseId } from "./crud.js";
 import { SharedRateLimiter } from "./ratelimit.js";
 import { passwordProblem } from "./security.js";
+import { sendEmail } from "./mailer.js";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
@@ -17,6 +18,25 @@ const generateTempPassword = (length = 14) =>
 const hashToken = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
 const acceptLimiter = new SharedRateLimiter("accept", Number(process.env.ACCEPT_RATE_MAX ?? 20), 15 * 60 * 1000);
 const resetLimiter = new SharedRateLimiter("team-reset", 10, 60 * 60 * 1000);
+
+const mailLimiter = new SharedRateLimiter("invite-mail", 30, 60 * 60 * 1000);
+const ROLE_PT: Record<string, string> = { admin: "administrador(a)", colaborador: "colaborador(a)", proprietario: "proprietário(a)", inquilino: "inquilino(a)" };
+
+/** E-mail do convite (texto simples). Nunca lança: devolve se foi enviado. */
+async function mailInvite(org: string, inviter: string, to: string, role: Role, url: string, ttlMs: number): Promise<boolean> {
+  const days = Math.round(ttlMs / 86_400_000);
+  const text = [
+    `Olá!`,
+    ``,
+    `${inviter} convidou você para acessar a ${org} no Ethos, como ${ROLE_PT[role] ?? role}.`,
+    ``,
+    `Para criar seu acesso (ou entrar, se já tem conta), abra o link abaixo. O e-mail ${to} já vem preenchido:`,
+    url,
+    ``,
+    `O link vale por ${days} dias e só pode ser usado uma vez. Se você não esperava este convite, ignore esta mensagem: nada será criado.`,
+  ].join("\n");
+  return sendEmail({ to, subject: `Convite para acessar ${org} no Ethos`, text });
+}
 
 export const teamRouter = Router();
 const adminOnly = [requireAuth, requireRole("admin")];
@@ -273,6 +293,11 @@ teamRouter.post("/invitations", ...adminOnly, async (req, res) => {
     return;
   }
   const token = crypto.randomBytes(32).toString("base64url");
+  const sendMail = req.body?.send_email !== false;
+  if (sendMail && !(await mailLimiter.allow(`org:${orgId}`))) {
+    res.status(429).json({ error: "Muitos convites enviados por e-mail. Desmarque o envio e copie o link, ou tente mais tarde." });
+    return;
+  }
   // Reenviar um convite substitui o pendente anterior (que deixa de funcionar).
   const [invitation] = await transaction(async (tx) => {
     await tx.query("DELETE FROM invitations WHERE organization_id = $1 AND email = $2 AND accepted_at IS NULL", [
@@ -285,7 +310,36 @@ teamRouter.post("/invitations", ...adminOnly, async (req, res) => {
       [orgId, email, role, hashToken(token), req.auth!.user.id, new Date(Date.now() + INVITE_TTL_MS), link.tenantId, link.ownerId],
     );
   });
-  res.status(201).json({ invitation, link: `${appUrl()}/?invite=${token}` });
+  const url = `${appUrl()}/?invite=${token}`;
+  const email_sent = sendMail ? await mailInvite(req.auth!.organization.name, req.auth!.user.name, email, role as Role, url, INVITE_TTL_MS) : false;
+  res.status(201).json({ invitation, link: url, email_sent });
+});
+
+/**
+ * Reenvia um convite pendente: como só o hash do token é guardado, gera um link NOVO (o anterior deixa de valer) e renova a validade.
+ * `send_email` (padrão true) manda o e-mail; com false só devolve o link para copiar.
+ */
+teamRouter.post("/invitations/:id/resend", ...adminOnly, async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  const id = parseId(req.params.id);
+  const sendMail = req.body?.send_email !== false;
+  const [inv] = id
+    ? await db.query<{ email: string; role: Role }>("SELECT email, role FROM invitations WHERE id = $1 AND organization_id = $2 AND accepted_at IS NULL", [id, orgId])
+    : [];
+  if (!inv) return void res.status(404).json({ error: "Não encontrado" });
+  if (sendMail && !(await mailLimiter.allow(`org:${orgId}`))) {
+    return void res.status(429).json({ error: "Muitos convites enviados por e-mail. Copie o link ou tente mais tarde." });
+  }
+  const token = crypto.randomBytes(32).toString("base64url");
+  const [updated] = await db.query<{ id: number; email: string; role: Role; expires_at: string; created_at: string; tenant_id: number | null; owner_id: number | null }>(
+    `UPDATE invitations SET token_hash = $3, expires_at = $4 WHERE id = $1 AND organization_id = $2 AND accepted_at IS NULL
+     RETURNING id, email, role, expires_at, created_at, tenant_id, owner_id`,
+    [id, orgId, hashToken(token), new Date(Date.now() + INVITE_TTL_MS)],
+  );
+  if (!updated) return void res.status(404).json({ error: "Não encontrado" });
+  const url = `${appUrl()}/?invite=${token}`;
+  const email_sent = sendMail ? await mailInvite(req.auth!.organization.name, req.auth!.user.name, inv.email, inv.role, url, INVITE_TTL_MS) : false;
+  res.json({ invitation: updated, link: url, email_sent });
 });
 
 teamRouter.delete("/invitations/:id", ...adminOnly, async (req, res) => {
@@ -313,12 +367,14 @@ interface InviteRow {
   role: Role;
   tenant_id: number | null;
   owner_id: number | null;
+  inviter_name: string | null;
 }
 
 async function findInvite(token: string): Promise<InviteRow | undefined> {
   const [row] = await db.query<InviteRow>(
-    `SELECT i.id, i.organization_id, o.name AS organization_name, i.email, i.role, i.tenant_id, i.owner_id
+    `SELECT i.id, i.organization_id, o.name AS organization_name, i.email, i.role, i.tenant_id, i.owner_id, u.name AS inviter_name
      FROM invitations i JOIN organizations o ON o.id = i.organization_id
+     LEFT JOIN users u ON u.id = i.invited_by
      WHERE i.token_hash = $1 AND i.accepted_at IS NULL AND i.expires_at > now()`,
     [hashToken(token)],
   );
@@ -340,6 +396,7 @@ teamRouter.get("/invitations/by-token/:token", async (req, res) => {
     email: invite.email,
     role: invite.role,
     organizationName: invite.organization_name,
+    inviterName: invite.inviter_name,
     existingAccount: existing.length > 0,
   });
 });
