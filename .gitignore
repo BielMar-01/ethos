@@ -5,3 +5,5 @@ data
 playwright-report
 test-results
 backups/
+# Anotações locais com senhas de teste: nunca versionar
+*.local.md
