@@ -84,6 +84,36 @@ describe("completar dados do contrato na própria tela", () => {
     assert.equal((await s.fill({ "unit:water_supply": "outro" })).status, 409, "nada mais pendente");
   });
 
+  it("dados da empresa são opcionais: sem eles o documento sai com linha em branco, avisa e mantém a assinatura", async () => {
+    const c = await register(base, "fill-opt@x.com", "Fill Opt");
+    const s = await bare(c, "9", "**ADMINISTRADORA:** {{administradora.razao_social}}, CNPJ {{administradora.cnpj}}. Locatário {{locatario.nome}}.\n[[assinaturas]]");
+    const p = await s.preview();
+    assert.equal(p.status, 200, JSON.stringify(p.body));
+    assert.ok(p.body.content.includes("**ADMINISTRADORA:** ______________, CNPJ ______________."));
+    assert.match(p.body.warnings.join(" "), /Dados da empresa em branco \(Razão social, CNPJ\)/);
+    assert.ok(p.body.layout.signers.some((x: { role: string; name: string }) => x.role.startsWith("ADMINISTRADORA") && x.name === "______________"));
+    assert.equal((await c.call("POST", `/api/leases/${s.leaseId}/documents`, { templateId: s.templateId })).status, 201);
+
+    // Com o modelo padrão, a falta continua bloqueando só o que é obrigatório; a empresa aparece como opcional.
+    const full = await bare(c, "10");
+    const r = await full.preview();
+    assert.equal(r.status, 422);
+    assert.ok(!r.body.missing.some((m: string) => m.startsWith("administradora.")), JSON.stringify(r.body.missing));
+    const company = (r.body.fixes as (Fix & { optional?: boolean })[]).filter((f) => f.id.startsWith("company:"));
+    assert.ok(company.length >= 6 && company.every((f) => f.optional));
+    // Preenchendo só o obrigatório (quantas rodadas precisar), o documento sai.
+    for (let round = 0; round < 3; round++) {
+      const now = await full.preview();
+      if (now.status === 200) break;
+      const required = (now.body.fixes as (Fix & { optional?: boolean })[]).filter((f) => !f.optional);
+      assert.equal((await full.fill(Object.fromEntries(required.map((f) => [f.id, answer(f)])))).status, 200);
+    }
+    const done = await full.preview();
+    assert.equal(done.status, 200, JSON.stringify(done.body));
+    assert.ok(done.body.content.includes("com sede em ______________"));
+    assert.equal((await c.call("GET", "/api/settings/company")).body.company.legal_name, null);
+  });
+
   it("não sobrescreve dado existente, valida os valores e é tudo ou nada", async () => {
     const c = await register(base, "fill2@x.com", "Fill2");
     const s = await bare(c, "2", "RG {{locatario.rg}} · {{locatario.estado_civil}} · {{unidade.quartos}} · {{locatario.email}} · {{contrato.indice_reajuste}}");

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db, transaction, isUniqueViolation, type Queryable } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 import { parseId, validate, type Field } from "./crud.js";
-import { BLOCKS, TEMPLATE_TYPES, VARIABLES, blockError, multiPersonWarnings, render, unknownVariables, type TemplateType } from "./contractTemplate.js";
+import { BLOCKS, TEMPLATE_TYPES, VARIABLES, blockError, findVariables, multiPersonWarnings, render, unknownVariables, type TemplateType } from "./contractTemplate.js";
 import { buildLayout, loadCompany, loadContractData, todayIso, type ContractData, type LeaseData } from "./contractData.js";
 import { STARTERS } from "./contractStarters.js";
 import { FixError, applyFixes, planFixes, type FixPlan } from "./contractFixes.js";
@@ -438,6 +438,9 @@ type Prepared =
   | { ok: true; template: { id: number; name: string; version: number; type: TemplateType }; renderWith: (number: string) => Rendered }
   | { ok: false; code: number; error: string; missing?: string[]; plan?: FixPlan; data?: ContractData; lease?: LeaseData };
 
+/** Os dados da empresa são opcionais: o que estiver vazio sai como linha em branco, sem impedir o documento. */
+const BLANK = "______________";
+
 /** "locatario.rg (Maria)" → "{{locatario.rg}} (Maria)". */
 const missingMessage = (missing: string[]) => `Faltam dados para gerar o contrato: ${missing.map((v) => v.replace(/^([^ ]+)/, "{{$1}}")).join(", ")}`;
 
@@ -458,9 +461,16 @@ async function prepareDocument(orgId: number, leaseId: number | undefined, templ
   if (!template) return { ok: false, code: 400, error: "Modelo inexistente (templateId)" };
 
   const data = await loadContractData(orgId, lease as unknown as LeaseData);
+  const blanks = findVariables(template.body).filter((v) => v.startsWith("administradora.") && !data.values[v]?.trim());
+  for (const v of blanks) data.values[v] = BLANK;
+  // O quadro de assinaturas acompanha o texto: se o modelo cita a administradora, ela tem onde assinar mesmo sem a razão social.
+  if (blanks.includes("administradora.razao_social")) {
+    data.signers.push({ role: "ADMINISTRADORA (interveniente)", name: BLANK, document: data.company.cnpj });
+  }
   const check = render(template.body, { ...data.values, "documento.numero": "MINUTA" }, data.groups);
   if ("missing" in check) {
-    const plan = await planFixes(orgId, check.missing, data, lease as unknown as LeaseData);
+    // Os opcionais entram na tela de preenchimento junto com os obrigatórios, para quem quiser aproveitar.
+    const plan = await planFixes(orgId, [...check.missing, ...blanks], data, lease as unknown as LeaseData);
     return { ok: false, code: 422, error: missingMessage(check.missing), missing: check.missing, plan, data, lease: lease as unknown as LeaseData };
   }
 
@@ -470,7 +480,12 @@ async function prepareDocument(orgId: number, leaseId: number | undefined, templ
     renderWith: (number) => {
       const variables = { ...data.values, "documento.numero": number };
       const out = render(template.body, variables, data.groups) as { text: string };
-      return { content: out.text, variables, layout: buildLayout(data, TEMPLATE_TYPES[template.type]), warnings: multiPersonWarnings(template.body, data.groups) };
+      const warnings = multiPersonWarnings(template.body, data.groups);
+      if (blanks.length) {
+        const labels = blanks.map((v) => VARIABLES.find((x) => x.key === v)!.label);
+        warnings.push(`Dados da empresa em branco (${labels.join(", ")}): saem como linha em branco no documento. Se quiser, preencha em Modelos > Dados da empresa antes de emitir.`);
+      }
+      return { content: out.text, variables, layout: buildLayout(data, TEMPLATE_TYPES[template.type]), warnings };
     },
   };
 }

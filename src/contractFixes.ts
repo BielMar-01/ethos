@@ -20,6 +20,8 @@ export interface Fix {
   options?: { value: string; label: string }[];
   hint?: string;
   adminOnly?: boolean;
+  /** Não impede o documento: se ficar vazio, sai como linha em branco. */
+  optional?: boolean;
 }
 
 export interface FixPlan {
@@ -132,7 +134,7 @@ export async function planFixes(orgId: number, missing: string[], data: Contract
     }
     if (COMPANY[name]) {
       const [column, label] = COMPANY[name];
-      add({ id: `company:${column}`, section: "Dados da empresa", label, input: column === "company_email" ? "email" : "text", adminOnly: true });
+      add({ id: `company:${column}`, section: "Dados da empresa (opcional)", label, input: column === "company_email" ? "email" : "text", adminOnly: true, optional: true });
     } else if (UNIT[name]) {
       const [column, label, input] = UNIT[name];
       add({ id: `unit:${column}`, section: `Unidade ${src.unit.identifier}`, label, input });

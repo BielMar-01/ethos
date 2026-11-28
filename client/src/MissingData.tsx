@@ -6,7 +6,7 @@ import { FormModal, type FieldSpec } from './kit'
 export interface MissingData {
   message: string
   unresolved: string[]
-  fixes: { id: string; section: string; label: string; input: 'text' | 'email' | 'number' | 'money' | 'select' | 'multi'; options?: { value: string; label: string }[]; hint?: string; adminOnly?: boolean }[]
+  fixes: { id: string; section: string; label: string; input: 'text' | 'email' | 'number' | 'money' | 'select' | 'multi'; options?: { value: string; label: string }[]; hint?: string; adminOnly?: boolean; optional?: boolean }[]
 }
 
 export default function MissingDataPanel({ data, isAdmin, open, onOpen, onClose, onSave }: {
@@ -19,8 +19,9 @@ export default function MissingDataPanel({ data, isAdmin, open, onOpen, onClose,
   onSave: (values: Record<string, unknown>) => Promise<string>
 }) {
   const allowed = data.fixes.filter((f) => isAdmin || !f.adminOnly)
-  const blocked = data.fixes.filter((f) => !isAdmin && f.adminOnly)
-  const notes = [...data.unresolved, ...(blocked.length ? [`Peça ao administrador para preencher os dados da empresa: ${blocked.map((f) => f.label).join(', ')}.`] : [])]
+  const required = allowed.filter((f) => !f.optional).length
+  const blocked = data.fixes.filter((f) => !isAdmin && f.adminOnly && !f.optional)
+  const notes = [...data.unresolved, ...(blocked.length ? [`Peça ao administrador para preencher: ${blocked.map((f) => f.label).join(', ')}.`] : [])]
 
   // Mantém os campos do mesmo grupo juntos, na ordem em que os grupos aparecem.
   const sections = [...new Set(allowed.map((f) => f.section))]
@@ -35,7 +36,7 @@ export default function MissingDataPanel({ data, isAdmin, open, onOpen, onClose,
   return (
     <div className="stack" role="alert">
       <Alert>
-        {allowed.length > 0 ? `Faltam ${allowed.length} informação(ões) para gerar o contrato.` : 'Faltam dados para gerar o contrato.'}
+        {required > 0 ? `Faltam ${required} informação(ões) para gerar o contrato.` : 'Faltam dados para gerar o contrato.'}
       </Alert>
       {notes.length > 0 && <ul className="plain-list small">{notes.map((n) => <li key={n}>{n}</li>)}</ul>}
       {allowed.length > 0 ? (
