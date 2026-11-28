@@ -1,10 +1,11 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { db, transaction, isUniqueViolation, type Queryable } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 import { parseId, validate, type Field } from "./crud.js";
 import { BLOCKS, TEMPLATE_TYPES, VARIABLES, blockError, findVariables, multiPersonWarnings, render, unknownVariables, type TemplateType } from "./contractTemplate.js";
 import { buildLayout, loadCompany, loadContractData, todayIso, type ContractData, type LeaseData } from "./contractData.js";
 import { STARTERS } from "./contractStarters.js";
+import { ImportError, importTemplate } from "./templateImport.js";
 import { FixError, applyFixes, planFixes, type FixPlan } from "./contractFixes.js";
 
 export const contractsRouter = Router();
@@ -77,7 +78,7 @@ contractsRouter.get("/contract-starters", (_req, res) => {
 
 contractsRouter.get("/contract-templates", async (req, res) => {
   const items = await db.query(
-    "SELECT id, name, type, body, version, created_at, updated_at FROM contract_templates WHERE organization_id = $1 ORDER BY name",
+    "SELECT id, name, type, body, version, is_default, created_at, updated_at FROM contract_templates WHERE organization_id = $1 ORDER BY name",
     [req.auth!.organization.id],
   );
   res.json({ items });
@@ -98,6 +99,38 @@ function templateError(name: unknown, body: unknown, partial: boolean): string |
   return undefined;
 }
 
+/** Marca (ou desmarca) o modelo padrão dos próximos contratos: no máximo um por organização. */
+async function setDefault(q: Queryable, orgId: number, id: number, value: boolean) {
+  if (value) await q.query("UPDATE contract_templates SET is_default = false WHERE organization_id = $1 AND is_default AND id <> $2", [orgId, id]);
+  await q.query("UPDATE contract_templates SET is_default = $3 WHERE id = $2 AND organization_id = $1", [orgId, id, value]);
+}
+
+contractsRouter.post("/contract-templates/:id/default", async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  const id = parseId(req.params.id);
+  const value = req.body?.value ?? true;
+  if (typeof value !== "boolean") return void res.status(400).json({ error: "Informe value (true ou false)" });
+  const [found] = id ? await db.query("SELECT 1 FROM contract_templates WHERE id = $1 AND organization_id = $2", [id, orgId]) : [];
+  if (!found) return void res.status(404).json({ error: "Não encontrado" });
+  await transaction((tx) => setDefault(tx, orgId, id!, value));
+  res.json({ id, is_default: value });
+});
+
+/** Lê um arquivo de modelo (Word, PDF ou texto) e devolve o texto para revisão. Não grava nada. */
+const templateFile = express.raw({ type: () => true, limit: 4 * 1024 * 1024 });
+contractsRouter.post("/contract-templates/read-file", templateFile, async (req, res) => {
+  const data = req.body as unknown;
+  if (!Buffer.isBuffer(data) || data.length === 0) return void res.status(400).json({ error: "Envie o arquivo do modelo (Word .docx, PDF ou texto, até 4 MB)." });
+  try {
+    const out = await importTemplate(data);
+    if (out.body.length > BODY_MAX) return void res.status(413).json({ error: "O texto do arquivo é longo demais para um modelo (limite de 90 mil caracteres)." });
+    res.json(out);
+  } catch (err) {
+    if (err instanceof ImportError) return void res.status(400).json({ error: err.message });
+    throw err;
+  }
+});
+
 contractsRouter.post("/contract-templates", async (req, res) => {
   const { name, body } = req.body ?? {};
   const type = req.body?.type ?? "locacao_residencial";
@@ -106,11 +139,19 @@ contractsRouter.post("/contract-templates", async (req, res) => {
     res.status(400).json({ error });
     return;
   }
+  const orgId = req.auth!.organization.id;
   try {
-    const [item] = await db.query(
-      "INSERT INTO contract_templates (organization_id, name, body, type) VALUES ($1, $2, $3, $4) RETURNING *",
-      [req.auth!.organization.id, name.trim(), body, type],
-    );
+    const item = await transaction(async (tx) => {
+      const [row] = await tx.query<{ id: number; is_default: boolean }>(
+        "INSERT INTO contract_templates (organization_id, name, body, type) VALUES ($1, $2, $3, $4) RETURNING *",
+        [orgId, name.trim(), body, type],
+      );
+      if (req.body?.is_default === true) {
+        await setDefault(tx, orgId, row!.id, true);
+        row!.is_default = true;
+      }
+      return row!;
+    });
     res.status(201).json({ item });
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -244,6 +285,7 @@ async function setLeaseTenants(tx: Queryable, leaseId: number, tenantIds: number
 contractsRouter.get("/leases", async (req, res) => {
   const items = await db.query(
     `SELECT l.id, l.status, l.start_date, l.end_date, l.rent_cents, l.due_day, l.unit_id,
+            (SELECT count(*)::int FROM lease_files f WHERE f.lease_id = l.id) AS file_count,
             u.identifier AS unit_identifier, p.name AS property_name,
             (SELECT string_agg(t.name, ', ' ORDER BY lt.position)
                FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenant_id WHERE lt.lease_id = l.id) AS tenant_names

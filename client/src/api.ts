@@ -144,6 +144,7 @@ export interface Template {
   id: number
   name: string
   type: string
+  is_default: boolean
   body: string
   version: number
   updated_at: string
@@ -153,6 +154,7 @@ export type LeaseStatus = 'rascunho' | 'vigente' | 'encerrado' | 'rescindido'
 
 export interface LeaseSummary {
   id: number
+  file_count?: number
   status: LeaseStatus
   start_date: string
   end_date: string
@@ -408,8 +410,11 @@ export const api = {
   company: () => request<{ company: Company }>('/api/settings/company'),
   saveCompany: (body: Partial<Company>) => request<{ company: Company }>('/api/settings/company', json('PUT', body)),
   templates: () => request<{ items: Template[] }>('/api/contract-templates'),
-  createTemplate: (name: string, type: string, body: string) =>
-    request<{ item: Template }>('/api/contract-templates', json('POST', { name, type, body })),
+  createTemplate: (name: string, type: string, body: string, isDefault = false) =>
+    request<{ item: Template }>('/api/contract-templates', json('POST', { name, type, body, is_default: isDefault })),
+  setDefaultTemplate: (id: number, value: boolean) => request<{ id: number }>(`/api/contract-templates/${id}/default`, json('POST', { value })),
+  readTemplateFile: (file: File) =>
+    request<{ format: string; body: string; variables: string[]; unknown: string[]; warnings: string[] }>('/api/contract-templates/read-file', { method: 'POST', body: file, headers: { 'Content-Type': 'application/octet-stream' } }),
   updateTemplate: (id: number, name: string, type: string, body: string) =>
     request<{ item: Template }>(`/api/contract-templates/${id}`, json('PATCH', { name, type, body })),
   removeTemplate: (id: number) => request<void>(`/api/contract-templates/${id}`, { method: 'DELETE' }),

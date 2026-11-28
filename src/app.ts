@@ -18,6 +18,7 @@ import { contracts2Router } from "./contracts2.js";
 import { signaturesRouter } from "./signatures.js";
 import { crmRouter } from "./crm.js";
 import { propDocsRouter } from "./propdocs.js";
+import { leaseFilesRouter } from "./leaseFiles.js";
 import { opsRouter } from "./ops.js";
 import { captureServerError, monitoringRouter } from "./monitoring.js";
 import { ownerReportsRouter, reportsRouter } from "./reports.js";
@@ -87,7 +88,7 @@ export function createApp() {
   app.use("/api", csrfGuard);
   app.use(loadAuth);
   // Leituras sensíveis que NÃO são oferecidas a chaves de API (dados pessoais/financeiros de terceiros, arquivos e evidências).
-  const KEY_BLOCKED = [/^\/api\/credit-checks/, /^\/api\/bank\//, /^\/api\/visitors\/\d+\/photo/, /^\/api\/property-documents\/\d+\/file/, /^\/api\/documents\/\d+\/signature/, /^\/api\/settings\/public-listing/, /^\/api\/reports\/(owner-income|dimob)/];
+  const KEY_BLOCKED = [/^\/api\/credit-checks/, /^\/api\/bank\//, /^\/api\/visitors\/\d+\/photo/, /^\/api\/property-documents\/\d+\/file/, /^\/api\/lease-files\/\d+\/file/, /^\/api\/documents\/\d+\/signature/, /^\/api\/settings\/public-listing/, /^\/api\/reports\/(owner-income|dimob)/];
   app.use("/api", (req, res, next) => {
     if (req.auth?.viaApiKey && KEY_BLOCKED.some((r) => r.test(req.originalUrl.split("?")[0]!))) return void res.status(403).json({ error: "Este recurso não está disponível para chaves de API." });
     next();
@@ -455,6 +456,7 @@ export function createApp() {
   app.use("/api", signaturesRouter);
   app.use("/api", crmRouter);
   app.use("/api", propDocsRouter);
+  app.use("/api", leaseFilesRouter);
   app.use("/api", opsRouter);
   app.use("/api", monitoringRouter);
   app.use("/api", reportsRouter);

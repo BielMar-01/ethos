@@ -13,6 +13,7 @@ import {
 } from './api'
 import ContractDocument, { type DocLayout } from './ContractDocument'
 import MissingDataPanel, { type MissingData } from './MissingData'
+import LeaseFiles from './LeaseFiles'
 import { brl, date, dateTime, parseReais } from './format'
 import MaskedInput from './MaskedInput'
 import { moneyFromCents } from './masks'
@@ -106,6 +107,7 @@ function LeaseList({ onOpen, onNew }: { onOpen: (id: number) => void; onNew: () 
               <tr>
                 <th>Imóvel / unidade</th>
                 <th>Locatários</th>
+                <th>Anexos</th>
                 <th>Período</th>
                 <th>Aluguel</th>
                 <th>Situação</th>
@@ -119,6 +121,7 @@ function LeaseList({ onOpen, onNew }: { onOpen: (id: number) => void; onNew: () 
                     {l.property_name} · {l.unit_identifier}
                   </td>
                   <td>{l.tenant_names ?? '—'}</td>
+                  <td>{l.file_count ? l.file_count : l.status === 'vigente' ? <span className="badge">sem anexo</span> : '—'}</td>
                   <td>
                     {date(l.start_date)} a {date(l.end_date)}
                   </td>
@@ -334,6 +337,8 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
       setDetail(d)
       setTemplates(t.items)
       setDocs(dc.items)
+      // O modelo padrão já vem escolhido (sem trocar a escolha que a pessoa fez).
+      setTemplateId((cur) => cur || String(t.items.find((x) => x.is_default)?.id ?? ''))
     } catch (e) {
       setError(message(e))
     }
@@ -463,7 +468,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
               <option value="">Escolha um modelo</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name} (v{t.version})
+                  {t.name} (v{t.version}){t.is_default ? ' · padrão' : ''}
                 </option>
               ))}
             </select>
@@ -495,6 +500,8 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
           O documento emitido guarda o texto e os dados deste momento; alterações posteriores no cadastro não o modificam. O sistema não presume a validade jurídica das cláusulas.
         </p>
       </div>
+
+      <LeaseFiles leaseId={id} isAdmin={isAdmin} />
 
       <LeaseExtras key={saved} leaseId={id} status={lease.status} isAdmin={isAdmin} onChanged={load} />
 

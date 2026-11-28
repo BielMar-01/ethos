@@ -23,6 +23,10 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
   const [body, setBody] = useState('')
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('')
+  const [asDefault, setAsDefault] = useState(false)
+  const [imported, setImported] = useState<string[] | null>(null)
+  const [reading, setReading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
 
   const load = useCallback(async () => {
@@ -46,6 +50,8 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
 
   function open(t: Template | 'new') {
     setError('')
+    setImported(null)
+    setAsDefault(false)
     setSearch('')
     setName(t === 'new' ? '' : t.name)
     setType(t === 'new' ? 'locacao_residencial' : t.type)
@@ -68,6 +74,38 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
     })
   }
 
+  /** Envia o arquivo do modelo; o texto convertido vem para o editor, para revisão antes de salvar. */
+  async function readFile(file: File) {
+    if (file.size > 4 * 1024 * 1024) return setError('O arquivo do modelo deve ter até 4 MB.')
+    if (editing && body.trim() && !(await ask('Substituir o texto que está no editor pelo conteúdo do arquivo?'))) return
+    setReading(true)
+    setError('')
+    try {
+      const r = await api.readTemplateFile(file)
+      if (!editing) {
+        open('new')
+        setName(file.name.replace(/\.[^.]+$/, '').slice(0, 200))
+        setAsDefault(true)
+      }
+      setBody(r.body)
+      setImported([`${r.variables.length} variável(is) encontrada(s). Revise o texto antes de salvar: o documento sai com a identidade da Ethos, não com o layout do arquivo.`, ...r.warnings])
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setReading(false)
+    }
+  }
+
+  async function toggleDefault(t: Template) {
+    try {
+      await api.setDefaultTemplate(t.id, !t.is_default)
+      await load()
+      toast.success(t.is_default ? 'Não há mais modelo padrão.' : `"${t.name}" é o modelo padrão dos próximos contratos.`)
+    } catch (err) {
+      setError(message(err))
+    }
+  }
+
   async function useStarter(id: string) {
     const starter = starters.find((s) => s.id === id)
     if (!starter) return
@@ -82,7 +120,7 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
     e.preventDefault()
     setError('')
     try {
-      if (editing === 'new') await api.createTemplate(name, type, body)
+      if (editing === 'new') await api.createTemplate(name, type, body, asDefault)
       else if (editing) await api.updateTemplate(editing.id, name, type, body)
       setEditing(null)
       await load()
@@ -118,6 +156,19 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
           </select>
         )}
         <button onClick={() => setCompany(true)}>Dados da empresa</button>
+        <button disabled={reading} onClick={() => fileRef.current?.click()}>{reading ? 'Lendo arquivo…' : 'Enviar meu modelo'}</button>
+        <input
+          ref={fileRef}
+          type="file"
+          hidden
+          aria-label="Arquivo do modelo"
+          accept=".docx,.pdf,.txt,.md,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            e.target.value = ''
+            if (file) void readFile(file)
+          }}
+        />
         <button className="primary" onClick={() => open('new')}>
           Novo modelo
         </button>
@@ -166,6 +217,15 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
       {editing && (
         <Modal title={editing === 'new' ? 'Novo modelo' : `Editar modelo (versão atual: ${editing.version})`} size="xl" onClose={() => setEditing(null)}>
         <form className="stack" onSubmit={save}>
+          {imported && (
+            <div className="notice stack" role="status">
+              <strong>Arquivo convertido</strong>
+              <ul className="plain-list small">{imported.map((w) => <li key={w}>{w}</li>)}</ul>
+            </div>
+          )}
+          <div>
+            <button type="button" disabled={reading} onClick={() => fileRef.current?.click()}>{reading ? 'Lendo arquivo…' : 'Carregar de um arquivo (Word, PDF ou texto)'}</button>
+          </div>
           <div className="form-grid">
             <label>
               Nome
@@ -239,6 +299,11 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
               <li><code>[[assinaturas]]</code> marca o lugar das assinaturas (sem isso, vão para o fim).</li>
             </ul>
           </details>
+          {editing === 'new' && (
+            <label className="check">
+              <input type="checkbox" checked={asDefault} onChange={(e) => setAsDefault(e.target.checked)} /> Usar como modelo padrão dos próximos contratos
+            </label>
+          )}
           <p className="muted small">
             Ao salvar uma alteração no texto, a versão do modelo sobe. Documentos já emitidos mantêm a versão com que foram gerados.
           </p>
@@ -274,13 +339,14 @@ export default function TemplatesPage({ canDelete }: { canDelete: boolean }) {
             <tbody>
               {visible.map((t) => (
                 <tr key={t.id} className="clickable" onClick={() => setViewing(t)}>
-                  <td>{t.name}</td>
+                  <td>{t.name} {t.is_default && <span className="badge badge-vigente">Padrão</span>}</td>
                   <td>{typeLabel(t.type)}</td>
                   <td>v{t.version}</td>
                   <td>{dateTime(t.updated_at)}</td>
                   <td className="row-actions" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => setViewing(t)}>Ver</button>
                     <button onClick={() => open(t)}>Editar</button>
+                    <button onClick={() => void toggleDefault(t)}>{t.is_default ? 'Tirar padrão' : 'Tornar padrão'}</button>
                     {canDelete && (
                       <button className="danger" onClick={() => remove(t)}>
                         Excluir
