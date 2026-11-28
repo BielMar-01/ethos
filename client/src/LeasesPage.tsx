@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   api,
+  ApiError,
   type ContractExtras,
   type DocFull,
   type DocSummary,
@@ -11,6 +12,7 @@ import {
   type Template,
 } from './api'
 import ContractDocument, { type DocLayout } from './ContractDocument'
+import MissingDataPanel, { type MissingData } from './MissingData'
 import { brl, date, dateTime, parseReais } from './format'
 import MaskedInput from './MaskedInput'
 import { moneyFromCents } from './masks'
@@ -322,6 +324,9 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [signing, setSigning] = useState<{ id: number; title: string } | null>(null)
+  const [missing, setMissing] = useState<MissingData | null>(null)
+  const [filling, setFilling] = useState(false)
+  const [saved, setSaved] = useState(0)
 
   const load = useCallback(async () => {
     try {
@@ -364,19 +369,40 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
     })
   }
 
+  /** Falta de dados não é beco sem saída: abre o preenchimento aqui mesmo. Outros erros seguem o caminho normal. */
+  async function orFill(action: () => Promise<void>) {
+    try {
+      await action()
+      setMissing(null)
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.status !== 422 || !Array.isArray(e.data.fixes)) throw e
+      setPreview(null)
+      setMissing({ fixes: e.data.fixes as MissingData['fixes'], unresolved: (e.data.unresolved as string[]) ?? [], message: e.message })
+      setFilling((e.data.fixes as unknown[]).length > 0)
+    }
+  }
+
   const doPreview = () =>
-    run(async () => {
+    run(() => orFill(async () => {
       const r = await api.previewDocument(id, Number(templateId))
       setPreview({ content: r.content, layout: r.layout, format: r.format, number: null, warnings: r.warnings, title: `${r.template.name} (v${r.template.version}) — pré-visualização` })
-    })
+    }))
 
   const doGenerate = () =>
-    run(async () => {
+    run(() => orFill(async () => {
       await api.generateDocument(id, Number(templateId))
       setPreview(null)
       setNotice('Documento emitido e guardado no histórico.')
       await load()
-    })
+    }))
+
+  // Depois de salvar os dados, recarrega o contrato e tenta a pré-visualização de novo (se ainda faltar algo, o formulário volta).
+  useEffect(() => {
+    if (saved === 0) return
+    void load()
+    void doPreview()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saved])
 
   const openDoc = (docId: number) =>
     run(async () => {
@@ -433,7 +459,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
           <p className="muted">Cadastre um modelo de contrato em “Modelos” para gerar o documento.</p>
         ) : (
           <div className="inline">
-            <select aria-label="Modelo" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+            <select aria-label="Modelo" value={templateId} onChange={(e) => { setTemplateId(e.target.value); setMissing(null) }}>
               <option value="">Escolha um modelo</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -444,12 +470,33 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
             <button disabled={!templateId} onClick={doPreview}>Pré-visualizar</button>
           </div>
         )}
+        {missing && (
+          <MissingDataPanel
+            data={missing}
+            isAdmin={isAdmin}
+            open={filling}
+            onOpen={() => setFilling(true)}
+            onClose={() => setFilling(false)}
+            onSave={async (values) => {
+              try {
+                const r = await api.completeDocumentData(id, Number(templateId), values)
+                setSaved((n) => n + 1)
+                return r.skipped ? `Dados salvos. ${r.skipped} campo(s) já tinham sido preenchidos e foram mantidos.` : 'Dados salvos no cadastro.'
+              } catch (e) {
+                // A lista mudou enquanto a janela estava aberta: atualiza em vez de deixar a pessoa presa no erro.
+                if (!(e instanceof ApiError) || !e.data.stale) throw e
+                setSaved((n) => n + 1)
+                return e.message
+              }
+            }}
+          />
+        )}
         <p className="muted small">
           O documento emitido guarda o texto e os dados deste momento; alterações posteriores no cadastro não o modificam. O sistema não presume a validade jurídica das cláusulas.
         </p>
       </div>
 
-      <LeaseExtras leaseId={id} status={lease.status} isAdmin={isAdmin} onChanged={load} />
+      <LeaseExtras key={saved} leaseId={id} status={lease.status} isAdmin={isAdmin} onChanged={load} />
 
       {preview && (
         <div className="panel print-area">

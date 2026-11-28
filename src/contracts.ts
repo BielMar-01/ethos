@@ -3,8 +3,9 @@ import { db, transaction, isUniqueViolation, type Queryable } from "./db.js";
 import { requireAuth, requireRole } from "./auth.js";
 import { parseId, validate, type Field } from "./crud.js";
 import { BLOCKS, TEMPLATE_TYPES, VARIABLES, blockError, multiPersonWarnings, render, unknownVariables, type TemplateType } from "./contractTemplate.js";
-import { buildLayout, loadCompany, loadContractData, todayIso, type LeaseData } from "./contractData.js";
+import { buildLayout, loadCompany, loadContractData, todayIso, type ContractData, type LeaseData } from "./contractData.js";
 import { STARTERS } from "./contractStarters.js";
+import { FixError, applyFixes, planFixes, type FixPlan } from "./contractFixes.js";
 
 export const contractsRouter = Router();
 contractsRouter.use(
@@ -435,7 +436,7 @@ interface Rendered {
 }
 type Prepared =
   | { ok: true; template: { id: number; name: string; version: number; type: TemplateType }; renderWith: (number: string) => Rendered }
-  | { ok: false; code: number; error: string; missing?: string[] };
+  | { ok: false; code: number; error: string; missing?: string[]; plan?: FixPlan; data?: ContractData; lease?: LeaseData };
 
 /** "locatario.rg (Maria)" → "{{locatario.rg}} (Maria)". */
 const missingMessage = (missing: string[]) => `Faltam dados para gerar o contrato: ${missing.map((v) => v.replace(/^([^ ]+)/, "{{$1}}")).join(", ")}`;
@@ -458,7 +459,10 @@ async function prepareDocument(orgId: number, leaseId: number | undefined, templ
 
   const data = await loadContractData(orgId, lease as unknown as LeaseData);
   const check = render(template.body, { ...data.values, "documento.numero": "MINUTA" }, data.groups);
-  if ("missing" in check) return { ok: false, code: 422, error: missingMessage(check.missing), missing: check.missing };
+  if ("missing" in check) {
+    const plan = await planFixes(orgId, check.missing, data, lease as unknown as LeaseData);
+    return { ok: false, code: 422, error: missingMessage(check.missing), missing: check.missing, plan, data, lease: lease as unknown as LeaseData };
+  }
 
   return {
     ok: true,
@@ -474,11 +478,31 @@ async function prepareDocument(orgId: number, leaseId: number | undefined, templ
 contractsRouter.post("/leases/:id/preview", async (req, res) => {
   const p = await prepareDocument(req.auth!.organization.id, parseId(req.params.id), req.body?.templateId);
   if (!p.ok) {
-    res.status(p.code).json({ error: p.error, missing: p.missing });
+    res.status(p.code).json({ error: p.error, missing: p.missing, ...p.plan });
     return;
   }
   const r = p.renderWith("MINUTA");
   res.json({ content: r.content, layout: r.layout, warnings: r.warnings, number: null, format: 2, template: p.template });
+});
+
+/**
+ * Completa, sem sair do contrato, o que falta para o modelo escolhido. Aceita só os campos que o próprio servidor apontou
+ * como pendentes (todos vazios), então nada é sobrescrito. Vale também para contrato vigente: só preenche lacunas.
+ */
+contractsRouter.post("/leases/:id/document-data", async (req, res) => {
+  const orgId = req.auth!.organization.id;
+  const values = req.body?.values;
+  if (!values || typeof values !== "object" || Array.isArray(values)) return void res.status(400).json({ error: "Informe os campos (values)" });
+  const p = await prepareDocument(orgId, parseId(req.params.id), req.body?.templateId);
+  if (p.ok) return void res.status(409).json({ error: "Não falta mais nada para este modelo. Pré-visualize de novo.", stale: true });
+  if (!p.plan) return void res.status(p.code).json({ error: p.error });
+  try {
+    res.json(await applyFixes(orgId, req.auth!.user.id, req.auth!.role === "admin", p.plan, p.data!, p.lease!, values as Record<string, unknown>));
+  } catch (err) {
+    if (err instanceof FixError) return void res.status(err.status).json({ error: err.message, ...(err.stale ? { stale: true } : {}) });
+    if (isUniqueViolation(err)) return void res.status(409).json({ error: "Esse CPF/CNPJ já está em outro cadastro." });
+    throw err;
+  }
 });
 
 contractsRouter.post("/leases/:id/documents", async (req, res) => {
@@ -486,7 +510,7 @@ contractsRouter.post("/leases/:id/documents", async (req, res) => {
   const leaseId = parseId(req.params.id);
   const p = await prepareDocument(orgId, leaseId, req.body?.templateId);
   if (!p.ok) {
-    res.status(p.code).json({ error: p.error, missing: p.missing });
+    res.status(p.code).json({ error: p.error, missing: p.missing, ...p.plan });
     return;
   }
   const year = Number(todayIso().slice(0, 4));

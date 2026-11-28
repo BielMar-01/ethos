@@ -77,12 +77,16 @@ export function Loaded<T>({ state, children }: { state: { data: T | null; error:
 
 // ------------------------------------------------------------------ Formulário em modal
 
-export type FieldSpec =
+export type FieldSpec = {
+  /** Subtítulo exibido antes do primeiro campo de cada grupo. */
+  section?: string
+} & (
   | { name: string; label: string; type?: 'text' | 'email' | 'number' | 'date' | 'datetime' | 'time' | 'textarea'; required?: boolean; hint?: string; placeholder?: string; min?: number; max?: number; wide?: boolean }
   | { name: string; label: string; type: 'money'; required?: boolean; hint?: string; wide?: boolean }
   | { name: string; label: string; type: 'select'; options: { value: string; label: string }[]; required?: boolean; hint?: string; wide?: boolean }
   | { name: string; label: string; type: 'check'; hint?: string; wide?: boolean }
   | { name: string; label: string; type: 'multi'; options: { value: string; label: string }[]; hint?: string; wide?: boolean }
+)
 
 type Values = Record<string, string | boolean | string[]>
 
@@ -158,62 +162,67 @@ export function FormModal({
     }
   }
 
+  function renderField(f: FieldSpec) {
+    const id = `f-${f.name}`
+    const wide = f.wide || f.type === 'textarea' || f.type === 'multi' ? 'wide' : undefined
+    if (f.type === 'check') {
+      return (
+        <label key={f.name} className={`check ${wide ?? ''}`}>
+          <input type="checkbox" checked={v[f.name] === true} onChange={(e) => set(f.name, e.target.checked)} /> {f.label}
+          {f.hint && <span className="muted small"> — {f.hint}</span>}
+        </label>
+      )
+    }
+    if (f.type === 'multi') {
+      return (
+        <fieldset key={f.name} className="mode-pick wide">
+          <legend>{f.label}</legend>
+          {f.options.map((o) => (
+            <label key={o.value}>
+              <input type="checkbox" checked={(v[f.name] as string[]).includes(o.value)} onChange={(e) => set(f.name, e.target.checked ? [...(v[f.name] as string[]), o.value] : (v[f.name] as string[]).filter((x) => x !== o.value))} /> {o.label}
+            </label>
+          ))}
+        </fieldset>
+      )
+    }
+    return (
+      <label key={f.name} className={wide} htmlFor={id}>
+        {f.label}
+        {f.type === 'select' ? (
+          <select id={id} value={String(v[f.name])} onChange={(e) => set(f.name, e.target.value)} required={f.required}>
+            {!f.required && <option value="">—</option>}
+            {f.required && v[f.name] === '' && <option value="">Escolha…</option>}
+            {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        ) : f.type === 'textarea' ? (
+          <textarea id={id} rows={3} value={String(v[f.name])} onChange={(e) => set(f.name, e.target.value)} required={f.required} placeholder={f.placeholder} />
+        ) : f.type === 'money' ? (
+          <span className="money-field"><span>R$</span><input id={id} inputMode="decimal" value={String(v[f.name])} onChange={(e) => set(f.name, e.target.value)} required={f.required} placeholder="0,00" aria-label={`${f.label} em reais`} /></span>
+        ) : (
+          <input
+            id={id}
+            type={f.type === 'datetime' ? 'datetime-local' : f.type ?? 'text'}
+            value={String(v[f.name])}
+            onChange={(e) => set(f.name, e.target.value)}
+            required={f.required}
+            placeholder={f.placeholder}
+            min={f.min}
+            max={f.max}
+          />
+        )}
+        {f.hint && <span className="muted small">{f.hint}</span>}
+      </label>
+    )
+  }
+
   return (
     <Modal title={title} size={size} onClose={onClose} locked={busy}>
       <form className="stack" onSubmit={submit}>
         {intro}
         <div className="form-grid">
-          {fields.map((f) => {
-            const id = `f-${f.name}`
-            const wide = f.wide || f.type === 'textarea' || f.type === 'multi' ? 'wide' : undefined
-            if (f.type === 'check') {
-              return (
-                <label key={f.name} className={`check ${wide ?? ''}`}>
-                  <input type="checkbox" checked={v[f.name] === true} onChange={(e) => set(f.name, e.target.checked)} /> {f.label}
-                  {f.hint && <span className="muted small"> — {f.hint}</span>}
-                </label>
-              )
-            }
-            if (f.type === 'multi') {
-              return (
-                <fieldset key={f.name} className="mode-pick wide">
-                  <legend>{f.label}</legend>
-                  {f.options.map((o) => (
-                    <label key={o.value}>
-                      <input type="checkbox" checked={(v[f.name] as string[]).includes(o.value)} onChange={(e) => set(f.name, e.target.checked ? [...(v[f.name] as string[]), o.value] : (v[f.name] as string[]).filter((x) => x !== o.value))} /> {o.label}
-                    </label>
-                  ))}
-                </fieldset>
-              )
-            }
-            return (
-              <label key={f.name} className={wide} htmlFor={id}>
-                {f.label}
-                {f.type === 'select' ? (
-                  <select id={id} value={String(v[f.name])} onChange={(e) => set(f.name, e.target.value)} required={f.required}>
-                    {!f.required && <option value="">—</option>}
-                    {f.required && v[f.name] === '' && <option value="">Escolha…</option>}
-                    {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                ) : f.type === 'textarea' ? (
-                  <textarea id={id} rows={3} value={String(v[f.name])} onChange={(e) => set(f.name, e.target.value)} required={f.required} placeholder={f.placeholder} />
-                ) : f.type === 'money' ? (
-                  <span className="money-field"><span>R$</span><input id={id} inputMode="decimal" value={String(v[f.name])} onChange={(e) => set(f.name, e.target.value)} required={f.required} placeholder="0,00" aria-label={`${f.label} em reais`} /></span>
-                ) : (
-                  <input
-                    id={id}
-                    type={f.type === 'datetime' ? 'datetime-local' : f.type ?? 'text'}
-                    value={String(v[f.name])}
-                    onChange={(e) => set(f.name, e.target.value)}
-                    required={f.required}
-                    placeholder={f.placeholder}
-                    min={f.min}
-                    max={f.max}
-                  />
-                )}
-                {f.hint && <span className="muted small">{f.hint}</span>}
-              </label>
-            )
+          {fields.flatMap((f, index) => {
+            const heading = f.section && f.section !== fields[index - 1]?.section ? [<h4 key={`s-${f.name}`} className="span-all form-section">{f.section}</h4>] : []
+            return [...heading, renderField(f)]
           })}
         </div>
         {error && <Alert>{error}</Alert>}

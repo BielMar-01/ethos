@@ -307,9 +307,12 @@ import { clearOfflineCache, readOffline, saveForOffline } from './offlineCache'
 
 export class ApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /** Corpo da resposta de erro (ex.: campos que faltam para gerar um contrato). */
+  data: Record<string, unknown>
+  constructor(message: string, status: number, data: Record<string, unknown> = {}) {
     super(message)
     this.status = status
+    this.data = data
   }
 }
 
@@ -349,6 +352,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(
       own || BY_STATUS[res.status] || (res.status >= 500 ? 'Algo deu errado do nosso lado. Tente novamente em instantes.' : 'Não foi possível concluir. Tente novamente.'),
       res.status,
+      data,
     )
   }
   if (isRead) saveForOffline(path, data)
@@ -422,6 +426,8 @@ export const api = {
       `/api/leases/${leaseId}/preview`,
       json('POST', { templateId }),
     ),
+  completeDocumentData: (leaseId: number, templateId: number, values: Record<string, unknown>) =>
+    request<{ saved: number; skipped: number }>(`/api/leases/${leaseId}/document-data`, json('POST', { templateId, values })),
   generateDocument: (leaseId: number, templateId: number) =>
     request<{ document: { id: number } }>(`/api/leases/${leaseId}/documents`, json('POST', { templateId })),
   documents: (leaseId: number) => request<{ items: DocSummary[] }>(`/api/leases/${leaseId}/documents`),

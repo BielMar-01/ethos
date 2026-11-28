@@ -100,6 +100,7 @@ interface Rule {
 const rules: Rule[] = [
   { method: "POST", path: /^\/api\/leases\/:id\/status$/, kind: "action", summary: "Mudou o status do contrato", event: "lease.status_changed" },
   { method: "POST", path: /^\/api\/leases\/:id\/documents$/, kind: "create", summary: "Emitiu documento de contrato" },
+  { method: "POST", path: /^\/api\/leases\/:id\/document-data$/, kind: "update", summary: "Completou dados que faltavam para o contrato" },
   { method: "POST", path: /^\/api\/leases\/:id\/preview$/, kind: "system", summary: "" },
   { method: "POST", path: /^\/api\/charges\/generate$/, kind: "action", summary: "Gerou cobranças do mês", event: "charges.generated" },
   { method: "POST", path: /^\/api\/charges\/:id\/cancel$/, kind: "action", summary: "Cancelou cobrança", event: "charge.cancelled" },

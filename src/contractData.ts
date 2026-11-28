@@ -148,6 +148,14 @@ export interface Signer {
 }
 
 export interface ContractData {
+  /** De onde cada dado veio (usado para completar o que falta na própria tela). */
+  source: {
+    unit: Record<string, string | number | null>;
+    owners: { id: number }[];
+    tenants: { id: number }[];
+    fiadores: { id: number; details: Record<string, string> }[];
+    guarantee: { id: number; kind: string; amount_cents: number | null; details: Record<string, string> } | undefined;
+  };
   values: Values;
   groups: Groups;
   signers: Signer[];
@@ -166,18 +174,18 @@ export async function loadContractData(orgId: number, lease: LeaseData): Promise
     [lease.unit_id, orgId],
   );
   const cols = "name, document, email, phone, rg, nationality, marital_status, profession, address, spouse_name, spouse_document, representative_name, representative_document";
-  const owners = await db.query<Person>(
-    `SELECT ${cols.split(", ").map((c) => `o.${c}`).join(", ")} FROM property_owners po JOIN owners o ON o.id = po.owner_id
+  const owners = await db.query<Person & { id: number }>(
+    `SELECT o.id, ${cols.split(", ").map((c) => `o.${c}`).join(", ")} FROM property_owners po JOIN owners o ON o.id = po.owner_id
      WHERE po.property_id = $1 AND o.organization_id = $2 ORDER BY o.name`,
     [unit!.property_id, orgId],
   );
-  const tenants = await db.query<Person>(
-    `SELECT ${cols.split(", ").map((c) => `t.${c}`).join(", ")} FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenant_id
+  const tenants = await db.query<Person & { id: number }>(
+    `SELECT t.id, ${cols.split(", ").map((c) => `t.${c}`).join(", ")} FROM lease_tenants lt JOIN tenants t ON t.id = lt.tenant_id
      WHERE lt.lease_id = $1 AND t.organization_id = $2 ORDER BY lt.position`,
     [lease.id, orgId],
   );
-  const guarantees = await db.query<{ kind: string; amount_cents: number | null; details: Record<string, string> }>(
-    "SELECT kind, amount_cents, details FROM lease_guarantees WHERE lease_id = $1 AND organization_id = $2 AND status = 'ativa' ORDER BY id",
+  const guarantees = await db.query<{ id: number; kind: string; amount_cents: number | null; details: Record<string, string> }>(
+    "SELECT id, kind, amount_cents, details FROM lease_guarantees WHERE lease_id = $1 AND organization_id = $2 AND status = 'ativa' ORDER BY id",
     [lease.id, orgId],
   );
   const [fin] = await db.query<{ late_fee_bps: number; late_interest_bps: number }>("SELECT late_fee_bps, late_interest_bps FROM organizations WHERE id = $1", [orgId]);
@@ -250,7 +258,8 @@ export async function loadContractData(orgId: number, lease: LeaseData): Promise
     { name: lease.witness1_name, document: lease.witness1_document },
     { name: lease.witness2_name, document: lease.witness2_document },
   ];
-  return { values, groups, signers, witnesses, company };
+  const source = { unit: unit!, owners, tenants, fiadores: guarantees.filter((g) => g.kind === "fiador"), guarantee: main };
+  return { source, values, groups, signers, witnesses, company };
 }
 
 /** Identidade e partes gravadas junto do documento: mudanças posteriores no cadastro não alteram o que foi emitido. */
