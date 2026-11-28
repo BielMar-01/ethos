@@ -210,10 +210,15 @@ tr.clickable {
 
 /* ------------------------------------------------------------------ Impressão: o modal vira a página */
 @media print {
+  /* O contêiner do app inteiro some: só esconder o painel deixava a altura de uma tela (uma folha em branco) antes do modal. */
+  body.has-modal #root,
   body.has-modal .shell,
   body.has-modal .pub,
   body.has-modal .toasts {
     display: none !important;
+  }
+  body.has-modal {
+    overflow: visible !important;
   }
   .modal-scrim {
     position: static;
@@ -441,4 +446,13 @@ tr.clickable {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+}
+
+/* O modal nunca cresce além da tela por causa de um conteúdo largo (a grade do fundo o alargava); o que não couber rola dentro dele. */
+.modal,
+.modal-body {
+  min-width: 0;
+}
+.modal-scrim {
+  grid-template-columns: minmax(0, 1fr);
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   api,
+  type ContractExtras,
   type DocFull,
   type DocSummary,
   type Item,
@@ -9,6 +10,7 @@ import {
   type LeaseSummary,
   type Template,
 } from './api'
+import ContractDocument, { type DocLayout } from './ContractDocument'
 import { brl, date, dateTime, parseReais } from './format'
 import MaskedInput from './MaskedInput'
 import { moneyFromCents } from './masks'
@@ -151,6 +153,8 @@ function LeaseForm({ id, onDone, onCancel }: { id?: number; onDone: (id: number)
   const [dueDay, setDueDay] = useState('5')
   const [guarantee, setGuarantee] = useState('')
   const [notes, setNotes] = useState('')
+  const [extra, setExtra] = useState<Record<keyof ContractExtras, string>>({ adjust_index: '', signing_city: '', witness1_name: '', witness1_document: '', witness2_name: '', witness2_document: '' })
+  const field = (k: keyof ContractExtras) => ({ value: extra[k], onChange: (e: { target: { value: string } }) => setExtra((cur) => ({ ...cur, [k]: e.target.value })) })
 
   useEffect(() => {
     async function load() {
@@ -169,6 +173,7 @@ function LeaseForm({ id, onDone, onCancel }: { id?: number; onDone: (id: number)
           setDueDay(String(d.lease.due_day))
           setGuarantee(d.lease.guarantee ?? '')
           setNotes(d.lease.notes ?? '')
+          setExtra((cur) => Object.fromEntries(Object.keys(cur).map((k) => [k, d.lease[k as keyof ContractExtras] ?? ''])) as typeof cur)
         }
       } catch (e) {
         setError(message(e))
@@ -202,6 +207,7 @@ function LeaseForm({ id, onDone, onCancel }: { id?: number; onDone: (id: number)
       guarantee: guarantee.trim() || null,
       notes: notes.trim() || null,
       tenantIds,
+      ...(Object.fromEntries(Object.entries(extra).map(([k, v]) => [k, v.trim() || null])) as unknown as ContractExtras),
     }
     try {
       const r = id ? await api.updateLease(id, input) : await api.createLease(input)
@@ -274,6 +280,17 @@ function LeaseForm({ id, onDone, onCancel }: { id?: number; onDone: (id: number)
               ))}
             </div>
           </fieldset>
+          <fieldset className="span-all">
+            <legend>Para o documento do contrato (opcional)</legend>
+            <div className="form-grid">
+              <label>Índice de reajuste<input {...field('adjust_index')} maxLength={60} placeholder="Ex.: IPCA" /></label>
+              <label>Cidade da assinatura<input {...field('signing_city')} maxLength={100} placeholder="Vazio = cidade da empresa" /></label>
+              <label>Testemunha 1<input {...field('witness1_name')} maxLength={200} /></label>
+              <label>Documento da testemunha 1<input {...field('witness1_document')} maxLength={40} /></label>
+              <label>Testemunha 2<input {...field('witness2_name')} maxLength={200} /></label>
+              <label>Documento da testemunha 2<input {...field('witness2_document')} maxLength={40} /></label>
+            </div>
+          </fieldset>
           <label className="span-all">
             Observações
             <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} />
@@ -301,7 +318,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
   const [templates, setTemplates] = useState<Template[]>([])
   const [docs, setDocs] = useState<DocSummary[]>([])
   const [templateId, setTemplateId] = useState('')
-  const [preview, setPreview] = useState<{ content: string; title: string; saved?: boolean } | null>(null)
+  const [preview, setPreview] = useState<{ content: string; title: string; saved?: boolean; format?: number; layout?: DocLayout | null; number?: string | null; warnings?: string[] } | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [signing, setSigning] = useState<{ id: number; title: string } | null>(null)
@@ -350,7 +367,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
   const doPreview = () =>
     run(async () => {
       const r = await api.previewDocument(id, Number(templateId))
-      setPreview({ content: r.content, title: `${r.template.name} (v${r.template.version}) — pré-visualização` })
+      setPreview({ content: r.content, layout: r.layout, format: r.format, number: null, warnings: r.warnings, title: `${r.template.name} (v${r.template.version}) — pré-visualização` })
     })
 
   const doGenerate = () =>
@@ -365,7 +382,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
     run(async () => {
       const r = await api.document(docId)
       const d: DocFull = r.document
-      setPreview({ content: d.content, title: `${d.template_name} (v${d.template_version}) — emitido em ${dateTime(d.created_at)}`, saved: true })
+      setPreview({ content: d.content, layout: d.layout, format: d.format, number: d.number, title: `${d.number ? `${d.number} · ` : ''}${d.template_name} (v${d.template_version}) — emitido em ${dateTime(d.created_at)}`, saved: true })
     })
 
   if (!detail) return error ? <Alert>{error}</Alert> : <Loading label="Carregando…" />
@@ -444,7 +461,8 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
               {!preview.saved && <button className="primary" onClick={doGenerate}>Emitir e guardar</button>}
             </div>
           </div>
-          <article className="paper">{preview.content}</article>
+          {preview.warnings?.map((w) => <p key={w} className="notice no-print" role="status">{w}</p>)}
+          <ContractDocument content={preview.content} layout={preview.layout} format={preview.format} number={preview.number} />
         </div>
       )}
 
@@ -457,6 +475,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
             <table>
               <thead>
                 <tr>
+                  <th>Número</th>
                   <th>Modelo</th>
                   <th>Emitido em</th>
                   <th>Por</th>
@@ -466,6 +485,7 @@ function LeaseDetailView({ id, isAdmin, onBack, onEdit }: { id: number; isAdmin:
               <tbody>
                 {docs.map((d) => (
                   <tr key={d.id}>
+                    <td>{d.number ?? '—'}</td>
                     <td>{d.template_name} (v{d.template_version})</td>
                     <td>{dateTime(d.created_at)}</td>
                     <td>{d.generated_by_name ?? '—'}</td>

@@ -3,6 +3,7 @@ import { request } from './api'
 import { Alert, Loading } from './feedback'
 import { json, money } from './kit'
 import MaskedInput from './MaskedInput'
+import ContractDocument, { type DocLayout } from './ContractDocument'
 
 /** Páginas públicas (sem login): assinatura de documento por link e vitrine de unidades disponíveis. */
 
@@ -16,7 +17,7 @@ const shell = (children: React.ReactNode) => (
 )
 
 interface SignInfo {
-  document: { title: string; content: string; hash: string }
+  document: { title: string; content: string; hash: string; number?: string | null; format?: number; layout?: DocLayout | null }
   signer: { name: string; role: string; signed_at: string | null }
   status: string
   others: { name: string; role: string; signed: boolean }[]
@@ -54,7 +55,9 @@ export function SignPage({ token }: { token: string }) {
     <>
       <h2>{info.document.title}</h2>
       <p className="muted">Olá, <strong>{info.signer.name}</strong> ({info.signer.role}). Leia o documento abaixo e, se concordar, assine no fim da página.</p>
-      <article className="paper" style={{ whiteSpace: 'pre-wrap', maxHeight: '50vh', overflow: 'auto' }} tabIndex={0} aria-label="Texto do documento">{info.document.content}</article>
+      <div style={{ maxHeight: '60vh', overflow: 'auto' }} tabIndex={0} role="region" aria-label="Texto do documento">
+        <ContractDocument content={info.document.content} layout={info.document.layout} format={info.document.format} number={info.document.number} />
+      </div>
       <p className="muted small">Impressão digital do texto (SHA-256): <code>{info.document.hash}</code></p>
       <h3>Quem assina</h3>
       <ul className="plain-list">{info.others.map((o) => <li key={o.name}>{o.name} <span className="muted">({o.role})</span> {o.signed ? <span className="badge badge-ok">assinou</span> : <span className="badge">pendente</span>}</li>)}</ul>

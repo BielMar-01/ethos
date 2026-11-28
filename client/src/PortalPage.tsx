@@ -1,3 +1,4 @@
+import ContractDocument, { type DocLayout } from './ContractDocument'
 import { useEffect, useState } from 'react'
 import {
   api,
@@ -75,7 +76,7 @@ function TenantArea({ initialTab }: { initialTab?: string }) {
   const [charges, setCharges] = useState<PortalCharge[]>([])
   const [payments, setPayments] = useState<PortalPayment[]>([])
   const [docs, setDocs] = useState<DocSummary[]>([])
-  const [paper, setPaper] = useState<{ title: string; content: string } | null>(null)
+  const [paper, setPaper] = useState<{ title: string; content: string; doc?: { format?: number; layout?: DocLayout | null; number?: string | null } } | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -109,7 +110,7 @@ function TenantArea({ initialTab }: { initialTab?: string }) {
   async function openDoc(id: number) {
     try {
       const d = (await api.portalDocument(id)).document
-      setPaper({ title: `${d.template_name} (v${d.template_version})`, content: d.content })
+      setPaper({ title: `${d.number ? `${d.number} · ` : ''}${d.template_name} (v${d.template_version})`, content: d.content, doc: { format: d.format, layout: d.layout, number: d.number } })
     } catch (e) {
       setError(message(e))
     }
@@ -129,7 +130,7 @@ function TenantArea({ initialTab }: { initialTab?: string }) {
               <button className="primary" onClick={() => window.print()}>Imprimir / salvar PDF</button>
             </div>
           </div>
-          <article className="paper">{paper.content}</article>
+          {paper.doc ? <ContractDocument content={paper.content} {...paper.doc} /> : <article className="paper">{paper.content}</article>}
         </div>
         </Modal>
       )}

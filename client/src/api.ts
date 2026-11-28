@@ -1,3 +1,4 @@
+import type { DocLayout } from './ContractDocument'
 export interface User {
   id: number
   name: string
@@ -142,6 +143,7 @@ export interface InviteInfo {
 export interface Template {
   id: number
   name: string
+  type: string
   body: string
   version: number
   updated_at: string
@@ -166,6 +168,12 @@ export interface LeaseDetail {
   lease: {
     id: number
     unit_id: number
+    adjust_index?: string | null
+    signing_city?: string | null
+    witness1_name?: string | null
+    witness1_document?: string | null
+    witness2_name?: string | null
+    witness2_document?: string | null
     start_date: string
     end_date: string
     rent_cents: number
@@ -180,6 +188,7 @@ export interface LeaseDetail {
 
 export interface DocSummary {
   id: number
+  number?: string | null
   template_name: string
   template_version: number
   created_at: string
@@ -189,6 +198,8 @@ export interface DocSummary {
 export interface DocFull extends DocSummary {
   lease_id: number
   content: string
+  format?: number
+  layout?: DocLayout | null
 }
 
 export type ChargeStatus = 'aberta' | 'parcial' | 'vencida' | 'paga' | 'cancelada'
@@ -246,7 +257,35 @@ export interface FinanceSummary {
   cash_received_cents: number
 }
 
-export interface LeaseInput {
+export interface ContractExtras {
+  adjust_index: string | null
+  signing_city: string | null
+  witness1_name: string | null
+  witness1_document: string | null
+  witness2_name: string | null
+  witness2_document: string | null
+}
+
+export interface TemplateVariables {
+  variables: { key: string; label: string; group: string }[]
+  blocks: { key: string; label: string }[]
+  types: { value: string; label: string }[]
+}
+
+export interface Company {
+  name: string
+  legal_name: string | null
+  cnpj: string | null
+  creci: string | null
+  company_address: string | null
+  company_city: string | null
+  company_phone: string | null
+  company_whatsapp: string | null
+  company_email: string | null
+  logo_data: string | null
+}
+
+export interface LeaseInput extends Partial<ContractExtras> {
   unit_id: number
   start_date: string
   end_date: string
@@ -360,12 +399,15 @@ export const api = {
     ),
 
   // Contratos
-  variables: () => request<{ variables: { key: string; label: string }[] }>('/api/contract-variables'),
+  variables: () => request<TemplateVariables>('/api/contract-variables'),
+  starters: () => request<{ items: { id: string; type: string; name: string; description: string; body: string }[] }>('/api/contract-starters'),
+  company: () => request<{ company: Company }>('/api/settings/company'),
+  saveCompany: (body: Partial<Company>) => request<{ company: Company }>('/api/settings/company', json('PUT', body)),
   templates: () => request<{ items: Template[] }>('/api/contract-templates'),
-  createTemplate: (name: string, body: string) =>
-    request<{ item: Template }>('/api/contract-templates', json('POST', { name, body })),
-  updateTemplate: (id: number, name: string, body: string) =>
-    request<{ item: Template }>(`/api/contract-templates/${id}`, json('PATCH', { name, body })),
+  createTemplate: (name: string, type: string, body: string) =>
+    request<{ item: Template }>('/api/contract-templates', json('POST', { name, type, body })),
+  updateTemplate: (id: number, name: string, type: string, body: string) =>
+    request<{ item: Template }>(`/api/contract-templates/${id}`, json('PATCH', { name, type, body })),
   removeTemplate: (id: number) => request<void>(`/api/contract-templates/${id}`, { method: 'DELETE' }),
   leases: () => request<{ items: LeaseSummary[] }>('/api/leases'),
   lease: (id: number) => request<LeaseDetail>(`/api/leases/${id}`),
@@ -376,7 +418,7 @@ export const api = {
   setLeaseStatus: (id: number, status: LeaseStatus) =>
     request<{ status: LeaseStatus }>(`/api/leases/${id}/status`, json('POST', { status })),
   previewDocument: (leaseId: number, templateId: number) =>
-    request<{ content: string; template: { name: string; version: number } }>(
+    request<{ content: string; layout: DocLayout; warnings: string[]; number: null; format: number; template: { name: string; version: number } }>(
       `/api/leases/${leaseId}/preview`,
       json('POST', { templateId }),
     ),

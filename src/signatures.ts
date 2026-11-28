@@ -119,10 +119,10 @@ signaturesRouter.get("/sign/:token", async (req, res) => {
   if (!(await publicLimiter.allow(`ip:${req.ip}`))) return void res.status(429).json({ error: "Muitas tentativas. Tente novamente em alguns minutos." });
   const s = await bySigner(String(req.params.token));
   if (!s || s.status === "cancelada") return void res.status(404).json({ error: "Link inválido ou cancelado." });
-  const [doc] = await db.query<{ content: string; template_name: string }>("SELECT content, template_name FROM contract_documents WHERE id = $1", [s.document_id]);
+  const [doc] = await db.query<{ content: string; template_name: string; number: string | null; format: number; layout: unknown }>("SELECT content, template_name, number, format, layout FROM contract_documents WHERE id = $1", [s.document_id]);
   await db.query("UPDATE signers SET viewed_at = COALESCE(viewed_at, now()) WHERE id = $1", [s.id]);
   const others = await db.query<{ name: string; role: string; signed: boolean }>("SELECT name, role, (signed_at IS NOT NULL) AS signed FROM signers WHERE request_id = $1 ORDER BY id", [s.request_id]);
-  res.json({ document: { title: doc!.template_name, content: doc!.content, hash: s.content_hash }, signer: { name: s.name, role: s.role, signed_at: s.signed_at }, status: s.status, others });
+  res.json({ document: { title: doc!.template_name, content: doc!.content, number: doc!.number, format: doc!.format, layout: doc!.layout, hash: s.content_hash }, signer: { name: s.name, role: s.role, signed_at: s.signed_at }, status: s.status, others });
 });
 
 signaturesRouter.post("/sign/:token", async (req, res) => {

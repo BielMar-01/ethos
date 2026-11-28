@@ -57,6 +57,16 @@ const personFields: Field[] = [
   { name: "document", kind: "string", required: true, max: 20 },
   { name: "email", kind: "string", email: true },
   { name: "phone", kind: "string", max: 30 },
+  // Qualificação para contratos (opcional no cadastro; o modelo exige quando usa).
+  { name: "nationality", kind: "string", max: 60 },
+  { name: "marital_status", kind: "string", max: 40 },
+  { name: "profession", kind: "string", max: 100 },
+  { name: "rg", kind: "string", max: 40 },
+  { name: "address", kind: "string", max: 300 },
+  { name: "spouse_name", kind: "string", max: 200 },
+  { name: "spouse_document", kind: "string", max: 20 },
+  { name: "representative_name", kind: "string", max: 200 },
+  { name: "representative_document", kind: "string", max: 20 },
 ];
 
 export function createApp() {
@@ -563,6 +573,10 @@ export function createApp() {
         { name: "identifier", kind: "string", required: true, max: 50 },
         { name: "area_m2", kind: "int" },
         { name: "bedrooms", kind: "int" },
+        { name: "registration_number", kind: "string", max: 60 },
+        { name: "iptu_number", kind: "string", max: 60 },
+        { name: "energy_installation", kind: "string", max: 40 },
+        { name: "water_supply", kind: "string", max: 40 },
         { name: "rent_reference_cents", kind: "int" },
         { name: "status", kind: "enum", values: UNIT_STATUS },
       ],

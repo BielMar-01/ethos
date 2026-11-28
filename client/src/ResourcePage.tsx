@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, type Item } from './api'
 import { cepDigits, lookupCep, maskCep } from './cep'
 import Modal from './Modal'
@@ -204,7 +204,9 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
         <Modal title={editing === 'new' ? `${def.fem ? 'Nova' : 'Novo'} ${def.singular}` : `Editar ${def.singular}`} onClose={() => setEditing(null)} size="md">
         <form className="form-grid" onSubmit={save}>
           {def.fields.map((f) => (
-            <label key={f.name}>
+            <Fragment key={f.name}>
+            {f.section && <h4 className="span-all form-section">{f.section}</h4>}
+            <label>
               {f.label}
               {f.type === 'select' ? (
                 <select
@@ -259,6 +261,7 @@ export default function ResourcePage({ def, canDelete }: { def: ResourceDef; can
               )}
               {f.cep && cepHint && <small className={`cep-hint ${cepHint.kind}`} role={cepHint.kind === 'error' ? 'alert' : 'status'}>{cepHint.text}</small>}
             </label>
+            </Fragment>
           ))}
           <div className="actions">
             <button type="button" onClick={() => setEditing(null)}>

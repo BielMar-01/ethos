@@ -115,7 +115,7 @@ portalRouter.get("/portal/tenant/payments/:id", ...tenantGuard, async (req, res)
 
 portalRouter.get("/portal/tenant/documents", ...tenantGuard, async (req, res) => {
   const items = await db.query(
-    `SELECT d.id, d.lease_id, d.template_name, d.template_version, d.created_at
+    `SELECT d.id, d.lease_id, d.template_name, d.template_version, d.number, d.created_at
      FROM contract_documents d
      WHERE d.organization_id = $1 AND d.lease_id IN (${MY_LEASES}) ORDER BY d.id DESC`,
     [req.auth!.organization.id, req.auth!.tenantId],
@@ -127,7 +127,7 @@ portalRouter.get("/portal/tenant/documents/:id", ...tenantGuard, async (req, res
   const id = parseId(req.params.id);
   const [document] = id
     ? await db.query(
-        `SELECT d.id, d.lease_id, d.template_name, d.template_version, d.content, d.created_at
+        `SELECT d.id, d.lease_id, d.template_name, d.template_version, d.content, d.number, d.format, d.layout, d.created_at
          FROM contract_documents d
          WHERE d.id = $3 AND d.organization_id = $1 AND d.lease_id IN (${MY_LEASES})`,
         [req.auth!.organization.id, req.auth!.tenantId, id],

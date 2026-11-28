@@ -212,7 +212,7 @@ function GuaranteeModal({ leaseId, guarantee, onClose, onDone }: { leaseId: numb
   const [kind, setKind] = useState(guarantee?.kind ?? 'fiador')
   const d = (name: string, label: string, required = false): FieldSpec => ({ name: `d_${name}`, label, required })
   const byKind: Record<string, FieldSpec[]> = {
-    fiador: [d('name', 'Nome do fiador', true), d('document', 'CPF/CNPJ', true), d('phone', 'Telefone'), d('email', 'E-mail'), d('address', 'Endereço')],
+    fiador: [d('name', 'Nome do fiador', true), d('document', 'CPF/CNPJ', true), d('phone', 'Telefone'), d('email', 'E-mail'), d('address', 'Endereço'), d('rg', 'RG e órgão emissor'), d('nationality', 'Nacionalidade'), d('marital_status', 'Estado civil'), d('profession', 'Profissão')],
     caucao: [{ name: 'amount_cents', label: 'Valor depositado', type: 'money', required: true }, d('months', 'Equivale a quantos aluguéis'), d('account', 'Onde está depositado')],
     seguro_fianca: [d('insurer', 'Seguradora', true), d('policy_number', 'Nº da apólice', true), { name: 'amount_cents', label: 'Cobertura', type: 'money' }, { name: 'valid_until', label: 'Vigência até', type: 'date', required: true }],
     titulo_capitalizacao: [d('issuer', 'Emissora', true), d('number', 'Nº do título', true), { name: 'amount_cents', label: 'Valor', type: 'money' }, { name: 'valid_until', label: 'Vencimento', type: 'date' }],

@@ -7,3 +7,5 @@ test-results
 backups/
 # Anotações locais com senhas de teste: nunca versionar
 *.local.md
+# Modelos originais e notas jurídicas (podem citar pessoas reais): não versionar
+docs/modelos/

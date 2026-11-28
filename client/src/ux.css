@@ -796,3 +796,18 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Contraste: a inicial do usuário sobre o fundo dourado translúcido usa o texto padrão (passa de 4,5:1 nos dois temas). */
 .avatar { color: var(--text); }
+
+/* Subtítulos dentro de formulários longos. */
+.form-section {
+  margin: 0.6rem 0 0;
+  padding-bottom: 0.3rem;
+  font-size: 0.95rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Grupos de variáveis no editor de modelos. */
+.var-group summary {
+  cursor: pointer;
+  padding: 0.35rem 0;
+  font-weight: 600;
+}
